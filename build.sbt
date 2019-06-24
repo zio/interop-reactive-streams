@@ -40,7 +40,7 @@ lazy val reactiveStreams = project
       "dev.zio"             %% "zio-streams"         % "1.0.0-RC8-12",
       "org.reactivestreams" % "reactive-streams"     % "1.0.2",
       "org.reactivestreams" % "reactive-streams-tck" % "1.0.2" % Test,
-      "org.scalatest"       %% "scalatest"           % "3.0.7" % Test,
+      "org.scalatest"       %% "scalatest"           % "3.0.8" % Test,
       "com.typesafe.akka"   %% "akka-stream"         % "2.5.23" % Test,
       "com.typesafe.akka"   %% "akka-stream-testkit" % "2.5.23" % Test
     )
