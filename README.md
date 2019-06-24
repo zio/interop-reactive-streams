@@ -1,5 +1,7 @@
 # Interop reactive streams
 
+[![CircleCI][ci-badge]][ci-url]
+
 This library provides an interoperability layer for reactive streams.
 
 ## Reactive Streams `Producer` and `Subscriber`
@@ -87,3 +89,6 @@ runtime.unsafeRun(
   }
 )
 ```
+
+[ci-badge]: https://circleci.com/gh/zio/interop-reactive-streams/tree/master.svg?style=svg
+[ci-url]: https://circleci.com/gh/zio/interop-reactive-streams/tree/master
