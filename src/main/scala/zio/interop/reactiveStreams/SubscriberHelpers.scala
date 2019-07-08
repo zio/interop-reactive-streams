@@ -1,7 +1,7 @@
 package zio.interop.reactiveStreams
 
 import org.reactivestreams.{ Subscriber, Subscription }
-import zio.stream.Sink.Step
+import zio.stream.ZSink.Step
 import zio.stream.ZSink
 import zio.{ Chunk, Queue, Runtime, UIO }
 
