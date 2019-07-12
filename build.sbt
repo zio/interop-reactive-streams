@@ -36,8 +36,8 @@ lazy val reactiveStreams = project
   .settings(buildInfoSettings)
   .settings(
     libraryDependencies ++= Seq(
-      "dev.zio"             %% "zio"                 % "1.0.0-RC9-4",
-      "dev.zio"             %% "zio-streams"         % "1.0.0-RC9-4",
+      "dev.zio"             %% "zio"                 % "1.0.0-RC10-1",
+      "dev.zio"             %% "zio-streams"         % "1.0.0-RC10-1",
       "org.reactivestreams" % "reactive-streams"     % "1.0.2",
       "org.reactivestreams" % "reactive-streams-tck" % "1.0.2" % Test,
       "org.scalatest"       %% "scalatest"           % "3.0.8" % Test,
