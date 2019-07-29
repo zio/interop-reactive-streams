@@ -46,6 +46,21 @@ jobs:
             - "~/.ivy2/cache"
             - "~/.sbt"
             - "~/.m2"
+  test213_jvm_jdk8:
+    machine:
+      image: ubuntu-1604:201903-01
+    steps:
+      - checkout
+      - restore_cache:
+          key: sbt-cache-machine
+      - run: sbt ++2.13.0! test
+      - run: sbt ++2.13.0! package packageSrc publishLocal
+      - save_cache:
+          key: sbt-cache-machine
+          paths:
+            - "~/.ivy2/cache"
+            - "~/.sbt"
+            - "~/.m2"
 
   release:
     docker:
@@ -59,6 +74,7 @@ jobs:
       - run: echo -n "${PGP_SECRET}" | base64 -d > /tmp/secret.asc
       - run: sbt ++2.11.12! releaseEarly
       - run: sbt ++2.12.8! releaseEarly
+      - run: sbt ++2.13.0! releaseEarly
 
 workflows:
   version: 2
@@ -80,11 +96,18 @@ workflows:
           filters:
             tags:
               only: /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
+      - test213_jvm_jdk8:
+          requires:
+            - lint212_jdk8
+          filters:
+            tags:
+              only: /^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
       - release:
           context: Sonatype
           requires:
             - test211_jvm_jdk8
             - test212_jvm_jdk8
+            - test213_jvm_jdk8
           filters:
             branches:
               ignore: /.*/
