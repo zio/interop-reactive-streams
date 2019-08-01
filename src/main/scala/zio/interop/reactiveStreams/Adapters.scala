@@ -5,9 +5,6 @@ import zio._
 import zio.interop.reactiveStreams.SubscriberHelpers._
 import zio.stream.{ Stream, ZSink, ZStream }
 
-//in scala 2.11 the proof for Any in not found by the compiler
-import Stream.ConformsAnyProof
-
 object Adapters {
 
   def sinkToSubscriber[R, E <: Throwable, A1, A, B](
