@@ -41,7 +41,7 @@ lazy val reactiveStreams = project
       "org.reactivestreams" % "reactive-streams"     % "1.0.2",
       "org.reactivestreams" % "reactive-streams-tck" % "1.0.2" % Test,
       "org.scalatest"       %% "scalatest"           % "3.0.8" % Test,
-      "org.specs2"          %% "specs2-core"         % "4.6.0" % Test,
+      "org.specs2"          %% "specs2-core"         % "4.7.0" % Test,
       "com.typesafe.akka"   %% "akka-stream"         % "2.5.23" % Test,
       "com.typesafe.akka"   %% "akka-stream-testkit" % "2.5.23" % Test
     )
