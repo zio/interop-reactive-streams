@@ -15,7 +15,7 @@ class StreamToPublisherTest(env: TestEnvironment, publisherShutdownTimeout: Long
   override val Platform = PlatformLive.Default.withReportFailure(_ => ())
 
   def this() {
-    this(new TestEnvironment(5000, 2500), 5000)
+    this(new TestEnvironment(2000, 500), 2000)
   }
 
   def createPublisher(elements: Long): Publisher[Int] =
