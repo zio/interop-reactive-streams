@@ -5,11 +5,14 @@ import org.reactivestreams.tck.{ SubscriberBlackboxVerification, TestEnvironment
 import org.scalatestplus.testng.TestNGSuiteLike
 import zio.DefaultRuntime
 import zio.stream.Sink
+import zio.internal.PlatformLive
 
 class SinkToSubscriberTest(env: TestEnvironment)
     extends SubscriberBlackboxVerification[Int](env)
     with TestNGSuiteLike
     with DefaultRuntime {
+
+  override val Platform = PlatformLive.Default.withReportFailure(_ => ())
 
   def this() {
     this(new TestEnvironment(1000, 500))
