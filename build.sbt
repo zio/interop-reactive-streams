@@ -38,8 +38,8 @@ lazy val reactiveStreams = project
     libraryDependencies ++= Seq(
       "dev.zio"             %% "zio"                 % "1.0.0-RC11-1",
       "dev.zio"             %% "zio-streams"         % "1.0.0-RC11-1",
-      "org.reactivestreams" % "reactive-streams"     % "1.0.2",
-      "org.reactivestreams" % "reactive-streams-tck" % "1.0.2" % Test,
+      "org.reactivestreams" % "reactive-streams"     % "1.0.3",
+      "org.reactivestreams" % "reactive-streams-tck" % "1.0.3" % Test,
       "org.scalatest"       %% "scalatest"           % "3.0.8" % Test,
       "org.specs2"          %% "specs2-core"         % "4.7.0" % Test,
       "com.typesafe.akka"   %% "akka-stream"         % "2.5.25" % Test,
