@@ -19,8 +19,8 @@ package object reactiveStreams {
   final implicit class sinkToSubscriber[R, E <: Throwable, A0, A, B](val sink: ZSink[R, E, A0, A, B]) extends AnyVal {
 
     /**
-     * Create a `Subscriber` from a `Sink`. Returns a subscriber producing to the Sink and a `Task` of the value
-     * produced by the Sink or any error either produced by the Sink or signaled to the subscriber.
+     * Create a `Subscriber` from a `Sink`.
+     * @param subscribe A continuation subscribing the Subscriber to a Publisher.
      * @param qSize The size used as internal buffer. If possible, set to a power of 2 value for best performance.
      */
     def toSubscriber[R1 <: R](qSize: Int = 16)(subscribe: Subscriber[A] => ZIO[R1, E, Unit]): ZIO[R1, Throwable, B] =
