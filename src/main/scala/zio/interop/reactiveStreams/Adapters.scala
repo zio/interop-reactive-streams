@@ -3,17 +3,15 @@ package zio.interop.reactiveStreams
 import org.reactivestreams.{ Publisher, Subscriber }
 import zio._
 import zio.interop.reactiveStreams.SubscriberHelpers._
-import zio.stream.{ Stream, ZSink, ZStream }
+import zio.stream.{ ZSink, ZStream }
 
 object Adapters {
 
-  def sinkToSubscriber[R, E <: Throwable, A1, A, B](
+  def sinkToSubscriber[R, R1 <: R, E <: Throwable, A1, A, B](
     sink: ZSink[R, E, A1, A, B],
     bufferSize: Int
-  ): ZIO[R, Nothing, (Subscriber[A], Task[B])] =
-    QueueSubscriber.make[A](bufferSize).flatMap {
-      case (subscriber, stream) => stream.run(sink).fork.map(fiber => (subscriber, fiber.join))
-    }
+  )(subscribe: Subscriber[A] => ZIO[R1, E, Unit]): ZIO[R1, Throwable, B] =
+    QueueSubscriber.sinkToSubscriber(sink, bufferSize)(subscribe)
 
   def streamToPublisher[R, E <: Throwable, A](stream: ZStream[R, E, A]): ZIO[R, Nothing, Publisher[A]] =
     ZIO.runtime.map { runtime => (subscriber: Subscriber[_ >: A]) =>
@@ -46,10 +44,6 @@ object Adapters {
     } yield (error, demandUnfoldSink(subscriber, demand))
 
   def publisherToStream[A](publisher: Publisher[A], bufferSize: Int): ZStream[Any, Throwable, A] =
-    Stream.unwrap(
-      QueueSubscriber.make[A](bufferSize).flatMap {
-        case (subscriber, stream) => UIO(publisher.subscribe(subscriber)).const(stream)
-      }
-    )
+    QueueSubscriber.publisherToStream(publisher, bufferSize)
 
 }
