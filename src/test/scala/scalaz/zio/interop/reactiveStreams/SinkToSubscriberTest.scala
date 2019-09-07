@@ -24,6 +24,34 @@ class SinkToSubscriberTest extends FunSuite with DefaultRuntime {
 
   val env = new TestEnvironment(1000, 500)
 
+  test("cancels subscription on interruption before subscription") {
+    val test =
+      for {
+        runtime    <- ZIO.runtime[Clock]
+        subscribed <- Promise.make[Nothing, Unit]
+        canceled   <- Promise.make[Nothing, Unit]
+        publisher = new Publisher[Int] {
+          override def subscribe(s: Subscriber[_ >: Int]): Unit = {
+            runtime.unsafeRun(subscribed.succeed(()).unit)
+            s.onSubscribe(
+              new Subscription {
+                override def request(n: Long): Unit =
+                  (1 to n.toInt).foreach(s.onNext(_))
+                override def cancel(): Unit = runtime.unsafeRun(canceled.succeed(()).unit)
+              }
+            )
+          }
+        }
+        (subscriber, result) <- Sink.drain.toSubscriber()
+        fiber                <- result.fork
+        _                    <- fiber.interrupt
+        _                    <- UIO(publisher.subscribe(subscriber))
+        _                    <- subscribed.await.timeoutFail("timeout awaiting subscription.")(500.millis)
+        _                    <- canceled.await.timeoutFail("timeout awaiting cancellation.")(500.millis)
+      } yield succeed
+    unsafeRun(test)
+  }
+
   test("cancels subscription on interruption during subscription") {
     val test =
       for {
@@ -42,10 +70,12 @@ class SinkToSubscriberTest extends FunSuite with DefaultRuntime {
             )
           }
         }
-        fiber <- Sink.drain.toSubscriber()(s => UIO(publisher.subscribe(s))).fork
-        _     <- subscribed.await.timeoutFail("timeout awaiting subscription.")(500.millis)
-        _     <- fiber.interrupt
-        _     <- canceled.await.timeoutFail("timeout awaiting cancellation.")(500.millis)
+        (subscriber, result) <- Sink.drain.toSubscriber()
+        fiber                <- result.fork
+        _                    <- UIO(publisher.subscribe(subscriber))
+        _                    <- subscribed.await.timeoutFail("timeout awaiting subscription.")(500.millis)
+        _                    <- fiber.interrupt
+        _                    <- canceled.await.timeoutFail("timeout awaiting cancellation.")(500.millis)
       } yield succeed
     unsafeRun(test)
   }
@@ -68,10 +98,12 @@ class SinkToSubscriberTest extends FunSuite with DefaultRuntime {
               }
             )
         }
-        fiber <- Sink.drain.toSubscriber()(s => UIO(publisher.subscribe(s))).fork
-        _     <- requested.await.timeoutFail("timeout awaiting request.")(500.millis)
-        _     <- fiber.interrupt
-        _     <- canceled.await.timeoutFail("timeout awaiting cancellation.")(500.millis)
+        (subscriber, result) <- Sink.drain.toSubscriber()
+        fiber                <- result.fork
+        _                    <- UIO(publisher.subscribe(subscriber))
+        _                    <- requested.await.timeoutFail("timeout awaiting request.")(500.millis)
+        _                    <- fiber.interrupt
+        _                    <- canceled.await.timeoutFail("timeout awaiting cancellation.")(500.millis)
       } yield succeed
     unsafeRun(test)
   }
@@ -81,21 +113,23 @@ class SinkToSubscriberTest extends FunSuite with DefaultRuntime {
       unsafeRun(
         Sink
           .collectAll[Int]
-          .toSubscriber[Clock]() { subscriber =>
-            ZManaged
-              .make[Clock, Throwable, SubscriberBlackboxVerification[Int]] {
-                val sbv =
-                  new SubscriberBlackboxVerification[Int](env) {
-                    override def createSubscriber(): Subscriber[Int] = subscriber
-                    override def createElement(element: Int): Int    = element
-                  }
-                UIO(sbv.setUp()) *> UIO(sbv.startPublisherExecutorService()).as(sbv)
-              } { sbv =>
-                UIO(sbv.shutdownPublisherExecutorService())
-              }
-              .use { sbv =>
-                Task(f(sbv)).timeout(env.defaultTimeoutMillis().millis).unit
-              }
+          .toSubscriber[Clock]()
+          .flatMap {
+            case (subscriber, _) =>
+              ZManaged
+                .make[Clock, Throwable, SubscriberBlackboxVerification[Int]] {
+                  val sbv =
+                    new SubscriberBlackboxVerification[Int](env) {
+                      override def createSubscriber(): Subscriber[Int] = subscriber
+                      override def createElement(element: Int): Int    = element
+                    }
+                  UIO(sbv.setUp()) *> UIO(sbv.startPublisherExecutorService()).as(sbv)
+                } { sbv =>
+                  UIO(sbv.shutdownPublisherExecutorService())
+                }
+                .use { sbv =>
+                  Task(f(sbv)).timeout(env.defaultTimeoutMillis().millis).unit
+                }
           }
           .catchAll {
             case _: TestException                                                    => UIO.unit

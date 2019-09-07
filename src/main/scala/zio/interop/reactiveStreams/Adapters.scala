@@ -53,13 +53,25 @@ object Adapters {
   def sinkToSubscriber[R, R1 <: R, A1, A, B](
     sink: ZSink[R, Throwable, A1, A, B],
     bufferSize: Int
-  )(subscribe: Subscriber[A] => ZIO[R1, Throwable, Unit]): ZIO[R1, Throwable, B] =
-    new ZStream[R1, Throwable, A](for {
-      (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
-      _                                         <- subscribe(subscriber).fork.toManaged_
-      sub                                       <- subscription.await.interruptible.toManaged(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_)))
-      process                                   <- process(q, sub, completion)
-    } yield process).run(sink)
+  ): ZIO[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
+    for {
+      (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize)
+      result                                    <- Promise.make[Throwable, B]
+      fiber <- new ZStream(for {
+                sub <- subscription.await.interruptible
+                        .toManaged(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_)))
+                process <- process(q, sub, completion)
+              } yield process)
+                .run(sink)
+                .to(result)
+                .onInterrupt(
+                  subscription.poll.flatMap {
+                    case None     => UIO.unit
+                    case Some(io) => io.map(_.cancel()).orElse(UIO.unit)
+                  } *> q.shutdown
+                )
+                .fork
+    } yield (subscriber, result.await.interruptible.onInterrupt(fiber.interrupt))
 
   /*
    * Unfold q. When `onComplete` or `onError` is signalled, take the remaining values from `q`, then shut down.

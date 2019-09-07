@@ -2,7 +2,7 @@ package zio.interop
 
 import org.reactivestreams.{ Publisher, Subscriber }
 import zio.stream.{ ZSink, ZStream }
-import zio.{ Promise, UIO, ZIO }
+import zio.{ IO, Promise, UIO, ZIO, ZManaged }
 
 package object reactiveStreams {
 
@@ -23,8 +23,8 @@ package object reactiveStreams {
      * @param subscribe A continuation subscribing the Subscriber to a Publisher.
      * @param qSize The size used as internal buffer. If possible, set to a power of 2 value for best performance.
      */
-    def toSubscriber[R1 <: R](qSize: Int = 16)(subscribe: Subscriber[A] => ZIO[R1, E, Unit]): ZIO[R1, Throwable, B] =
-      Adapters.sinkToSubscriber(sink, qSize)(subscribe)
+    def toSubscriber[R1 <: R](qSize: Int = 16): ZIO[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
+      Adapters.sinkToSubscriber(sink, qSize)
   }
 
   final implicit class publisherToStream[A](val publisher: Publisher[A]) extends AnyVal {
