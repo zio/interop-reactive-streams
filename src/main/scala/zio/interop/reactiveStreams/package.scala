@@ -2,7 +2,7 @@ package zio.interop
 
 import org.reactivestreams.{ Publisher, Subscriber }
 import zio.stream.{ ZSink, ZStream }
-import zio.{ IO, Promise, UIO, ZIO, ZManaged }
+import zio.{ IO, Promise, UIO, ZIO }
 
 package object reactiveStreams {
 
