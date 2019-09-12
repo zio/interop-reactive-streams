@@ -19,6 +19,9 @@ class PublisherToStreamSpec extends BaseCrossPlatformSpec with AfterAll {
      works with a well behaved `Publisher` $e1
      fails with an initially failed `Publisher` $e2
      fails with an eventually failing `Publisher` $e3
+     cancels subscription when interrupted before subscription $e4
+     cancels subscription when interrupted after subscription $e5
+     cancels subscription when interrupted during consumption $e6
     """
 
   implicit private val system: ActorSystem             = ActorSystem()
@@ -32,9 +35,9 @@ class PublisherToStreamSpec extends BaseCrossPlatformSpec with AfterAll {
 
   private val bufferSize = 10
 
-  private def publish(seq: List[Int], failure: Option[Throwable]): Exit[Throwable, List[Int]] = {
+  private val probePublisherGraph = TestSource.probe[Int].toMat(AkkaSink.asPublisher(fanout = false))(Keep.both)
 
-    val probePublisherGraph = TestSource.probe[Int].toMat(AkkaSink.asPublisher(fanout = false))(Keep.both)
+  private def publish(seq: List[Int], failure: Option[Throwable]): Exit[Throwable, List[Int]] = {
 
     def loop(probe: Probe[Int], remaining: List[Int], pending: Int): Task[Unit] =
       for {
@@ -64,4 +67,42 @@ class PublisherToStreamSpec extends BaseCrossPlatformSpec with AfterAll {
   private val e2 = publish(Nil, Some(e)) should_=== Exit.Failure(Cause.fail(e))
 
   private val e3 = publish(seq, Some(e)) should_=== Exit.Failure(Cause.fail(e))
+
+  private val e4 =
+    unsafeRun {
+      for {
+        pp                 <- Task(probePublisherGraph.run())
+        (probe, publisher) = pp
+        fiber              <- publisher.toStream(bufferSize).run(Sink.drain).fork
+        _                  <- fiber.interrupt
+        _                  <- Task(probe.expectCancellation())
+      } yield success
+    }
+
+  private val e5 =
+    unsafeRun {
+      for {
+        pp                 <- Task(probePublisherGraph.run())
+        (probe, publisher) = pp
+        fiber              <- publisher.toStream(bufferSize).run(Sink.drain).fork
+        _                  <- Task(probe.ensureSubscription())
+        _                  <- fiber.interrupt
+        _                  <- Task(probe.expectCancellation())
+      } yield success
+    }
+
+  private val e6 =
+    unsafeRun {
+      for {
+        pp                 <- Task(probePublisherGraph.run())
+        (probe, publisher) = pp
+        fiber              <- publisher.toStream(bufferSize).run(Sink.drain).fork
+        _                  <- Task(probe.ensureSubscription())
+        demand             <- Task(probe.expectRequest())
+        _                  <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+        _                  <- fiber.interrupt
+        _                  <- Task(probe.expectCancellation())
+      } yield success
+    }
+
 }

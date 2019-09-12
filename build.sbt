@@ -29,6 +29,8 @@ scmInfo := Some(
   )
 )
 
+addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
+
 lazy val reactiveStreams = project
   .in(file("."))
   .enablePlugins(BuildInfoPlugin)
@@ -36,8 +38,8 @@ lazy val reactiveStreams = project
   .settings(buildInfoSettings)
   .settings(
     libraryDependencies ++= Seq(
-      "dev.zio"             %% "zio"                 % "1.0.0-RC11-1",
-      "dev.zio"             %% "zio-streams"         % "1.0.0-RC11-1",
+      "dev.zio"             %% "zio"                 % "1.0.0-RC12-1",
+      "dev.zio"             %% "zio-streams"         % "1.0.0-RC12-1",
       "org.reactivestreams" % "reactive-streams"     % "1.0.3",
       "org.reactivestreams" % "reactive-streams-tck" % "1.0.3" % Test,
       "org.scalatest"       %% "scalatest"           % "3.0.8" % Test,

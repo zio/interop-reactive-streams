@@ -1,19 +1,13 @@
 package zio.interop.reactiveStreams
 
-import org.reactivestreams.{ Publisher, Subscriber }
+import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import zio._
-import zio.interop.reactiveStreams.SubscriberHelpers._
-import zio.stream.{ Stream, ZSink, ZStream }
+import zio.stream.{ ZSink, ZStream }
+import zio.stream.ZSink.Step
+import zio.stream.ZStream.Pull
+import org.reactivestreams.{ Subscriber, Subscription }
 
 object Adapters {
-
-  def sinkToSubscriber[R, E <: Throwable, A1, A, B](
-    sink: ZSink[R, E, A1, A, B],
-    bufferSize: Int
-  ): ZIO[R, Nothing, (Subscriber[A], Task[B])] =
-    QueueSubscriber.make[A](bufferSize).flatMap {
-      case (subscriber, stream) => stream.run(sink).fork.map(fiber => (subscriber, fiber.join))
-    }
 
   def streamToPublisher[R, E <: Throwable, A](stream: ZStream[R, E, A]): ZIO[R, Nothing, Publisher[A]] =
     ZIO.runtime.map { runtime => (subscriber: Subscriber[_ >: A]) =>
@@ -46,10 +40,153 @@ object Adapters {
     } yield (error, demandUnfoldSink(subscriber, demand))
 
   def publisherToStream[A](publisher: Publisher[A], bufferSize: Int): ZStream[Any, Throwable, A] =
-    Stream.unwrap(
-      QueueSubscriber.make[A](bufferSize).flatMap {
-        case (subscriber, stream) => UIO(publisher.subscribe(subscriber)).const(stream)
-      }
+    new ZStream(
+      for {
+        (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
+        _                                         <- UIO(publisher.subscribe(subscriber)).toManaged_
+        sub <- subscription.await.interruptible
+                .toManaged(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_)))
+        process <- process(q, sub, completion)
+      } yield process
     )
 
+  def sinkToSubscriber[R, R1 <: R, A1, A, B](
+    sink: ZSink[R, Throwable, A1, A, B],
+    bufferSize: Int
+  ): ZManaged[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
+    for {
+      (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
+      result                                    <- Promise.make[Throwable, B].toManaged_
+      _ <- new ZStream(for {
+            sub <- subscription.await.interruptible
+                    .toManaged(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_)))
+            process <- process(q, sub, completion)
+          } yield process)
+            .run(sink)
+            .to(result)
+            .interruptible // `to` is not interruptible by default
+            .fork
+            .toManaged(_.interrupt)
+    } yield (subscriber, result.await)
+
+  /*
+   * Unfold q. When `onComplete` or `onError` is signalled, take the remaining values from `q`, then shut down.
+   * `onComplete` or `onError` always are the last signal if they occur. We optimistically take from `q` and rely on
+   * interruption in case that they are signalled while we wait. `forkQShutdownHook` ensures that `take` is
+   * interrupted in case `q` is empty while `onComplete` or `onError` is signalled.
+   * When we see `completion.done`, the `Publisher` has signalled `onComplete` or `onError` and we are
+   * done. Otherwise the stream has completed before and we need to cancel the subscription.
+   */
+  private def process[R, A](
+    q: Queue[A],
+    sub: Subscription,
+    completion: Promise[Throwable, Unit]
+  ): ZManaged[R, Throwable, Pull[Any, Throwable, A]] =
+    for {
+      _      <- ZManaged.finalizer(q.shutdown)
+      _      <- completion.await.ensuring(q.size.flatMap(n => if (n <= 0) q.shutdown else UIO.unit)).fork.toManaged_
+      demand <- Ref.make(0L).toManaged_
+    } yield {
+
+      val capacity: Long = q.capacity.toLong
+
+      val requestAndTake = demand.modify(d => (sub.request(capacity - d), capacity - 1)) *> q.take.flatMap(Pull.emit)
+      val take           = demand.update(_ - 1) *> q.take.flatMap(Pull.emit)
+
+      q.size.flatMap { n =>
+        if (n <= 0) completion.isDone.flatMap {
+          case true  => completion.await.foldM(Pull.fail, _ => Pull.end)
+          case false => demand.get.flatMap(d => if (d < capacity) requestAndTake else take)
+        } else take
+      }.orElse(
+        completion.poll.flatMap {
+          case None     => Pull.end
+          case Some(io) => io.foldM(Pull.fail, _ => Pull.end)
+        }
+      )
+    }
+
+  private def makeSubscriber[A](
+    capacity: Int
+  ): UIO[(Queue[A], Promise[Throwable, Subscription], Promise[Throwable, Unit], Subscriber[A])] =
+    for {
+      runtime      <- ZIO.runtime[Any]
+      q            <- Queue.bounded[A](capacity)
+      subscription <- Promise.make[Throwable, Subscription]
+      completion   <- Promise.make[Throwable, Unit]
+    } yield {
+      val subscriber = new Subscriber[A] {
+
+        override def onSubscribe(s: Subscription): Unit =
+          if (s == null) {
+            val e = new NullPointerException("s was null in onSubscribe")
+            runtime.unsafeRun(subscription.fail(e))
+            throw e
+          } else {
+            runtime.unsafeRun(subscription.succeed(s).flatMap {
+              // `whenM(q.isShutdown)`, the Stream has been interrupted or completed before we received `onSubscribe`
+              case true  => UIO(s.cancel()).whenM(q.isShutdown)
+              case false => UIO(s.cancel())
+            })
+          }
+
+        override def onNext(t: A): Unit =
+          if (t == null) {
+            val e = new NullPointerException("t was null in onNext")
+            runtime.unsafeRun(completion.fail(e))
+            throw e
+          } else {
+            runtime.unsafeRunSync(q.offer(t))
+            ()
+          }
+
+        override def onError(e: Throwable): Unit =
+          if (e == null) {
+            val e = new NullPointerException("t was null in onError")
+            runtime.unsafeRun(completion.fail(e))
+            throw e
+          } else {
+            runtime.unsafeRun(completion.fail(e).unit)
+          }
+
+        override def onComplete(): Unit = runtime.unsafeRun(completion.succeed(()).unit)
+      }
+      (q, subscription, completion, subscriber)
+    }
+
+  def demandUnfoldSink[A](
+    subscriber: Subscriber[_ >: A],
+    demand: Queue[Long]
+  ): ZSink[Any, Nothing, Unit, A, Unit] =
+    new ZSink[Any, Nothing, Unit, A, Unit] {
+      override type State = Long
+
+      override def initial: UIO[Step[Long, Nothing]] = UIO(Step.more(0L))
+
+      override def step(state: Long, a: A): UIO[Step[Long, Nothing]] =
+        demand.isShutdown.flatMap {
+          case true               => UIO(Step.done(state, Chunk.empty))
+          case false if state > 0 => UIO(subscriber.onNext(a)).map(_ => Step.more(state - 1))
+          case false              => demand.take.flatMap(n => UIO(subscriber.onNext(a)).map(_ => Step.more(n - 1)))
+        }
+
+      override def extract(state: Long): UIO[Unit] =
+        demand.isShutdown.flatMap {
+          case true  => UIO.unit
+          case false => UIO(subscriber.onComplete())
+        }
+    }
+
+  def createSubscription[A](
+    subscriber: Subscriber[_ >: A],
+    demand: Queue[Long],
+    runtime: Runtime[_]
+  ): Subscription =
+    new Subscription {
+      override def request(n: Long): Unit = {
+        if (n <= 0) subscriber.onError(new IllegalArgumentException("n must be > 0"))
+        runtime.unsafeRunAsync_(demand.offer(n).unit)
+      }
+      override def cancel(): Unit = runtime.unsafeRun(demand.shutdown)
+    }
 }

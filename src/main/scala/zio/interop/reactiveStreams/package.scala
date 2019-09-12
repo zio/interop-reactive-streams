@@ -2,7 +2,7 @@ package zio.interop
 
 import org.reactivestreams.{ Publisher, Subscriber }
 import zio.stream.{ ZSink, ZStream }
-import zio.{ Promise, Task, UIO, ZIO }
+import zio.{ IO, Promise, UIO, ZIO, ZManaged }
 
 package object reactiveStreams {
 
@@ -19,11 +19,13 @@ package object reactiveStreams {
   final implicit class sinkToSubscriber[R, E <: Throwable, A0, A, B](val sink: ZSink[R, E, A0, A, B]) extends AnyVal {
 
     /**
-     * Create a `Subscriber` from a `Sink`. Returns a subscriber producing to the Sink and a `Task` of the value
-     * produced by the Sink or any error either produced by the Sink or signaled to the subscriber.
+     * Create a `Subscriber` from a `Sink`. The returned IO will eventually return the result of running the subscribed
+     * stream to the sink. Consumption is started as soon as the resource is used, even if the IO is never run. Interruption
+     * propagates from the `Zmanaged` to the stream, but not from the IO.
      * @param qSize The size used as internal buffer. If possible, set to a power of 2 value for best performance.
+     *
      */
-    def toSubscriber(qSize: Int = 16): ZIO[R, Nothing, (Subscriber[A], Task[B])] =
+    def toSubscriber[R1 <: R](qSize: Int = 16): ZManaged[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
       Adapters.sinkToSubscriber(sink, qSize)
   }
 
