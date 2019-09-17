@@ -36,15 +36,15 @@ lazy val reactiveStreams = project
   .enablePlugins(BuildInfoPlugin)
   .settings(stdSettings("zio-interop-reactiveStreams"))
   .settings(buildInfoSettings)
+  .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
   .settings(
     libraryDependencies ++= Seq(
       "dev.zio"             %% "zio"                 % "1.0.0-RC12-1",
       "dev.zio"             %% "zio-streams"         % "1.0.0-RC12-1",
+      "dev.zio"             %% "zio-test"            % "1.0.0-RC12-1" % Test,
+      "dev.zio"             %% "zio-test-sbt"        % "1.0.0-RC12-1" % Test,
       "org.reactivestreams" % "reactive-streams"     % "1.0.3",
       "org.reactivestreams" % "reactive-streams-tck" % "1.0.3" % Test,
-      "org.scalatest"       %% "scalatest"           % "3.0.8" % Test,
-      "org.specs2"          %% "specs2-core"         % "4.7.1" % Test,
-      "com.typesafe.akka"   %% "akka-stream"         % "2.5.25" % Test,
-      "com.typesafe.akka"   %% "akka-stream-testkit" % "2.5.25" % Test
+      "org.scalatest"       %% "scalatest"           % "3.0.8" % Test
     )
   )

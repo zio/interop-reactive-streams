@@ -6,7 +6,7 @@ import zio.{ IO, Promise, UIO, ZIO, ZManaged }
 
 package object reactiveStreams {
 
-  final implicit class streamToPublisher[R, E <: Throwable, A](val stream: ZStream[R, E, A]) extends AnyVal {
+  final implicit class streamToPublisher[R, E <: Throwable, A](private val stream: ZStream[R, E, A]) extends AnyVal {
 
     /**
      * Create a `Publisher` from a `Stream`. Every time the `Publisher` is subscribed to, a new instance of the `Stream`
@@ -16,7 +16,8 @@ package object reactiveStreams {
       Adapters.streamToPublisher(stream)
   }
 
-  final implicit class sinkToSubscriber[R, E <: Throwable, A0, A, B](val sink: ZSink[R, E, A0, A, B]) extends AnyVal {
+  final implicit class sinkToSubscriber[R, E <: Throwable, A0, A, B](private val sink: ZSink[R, E, A0, A, B])
+      extends AnyVal {
 
     /**
      * Create a `Subscriber` from a `Sink`. The returned IO will eventually return the result of running the subscribed
@@ -29,7 +30,7 @@ package object reactiveStreams {
       Adapters.sinkToSubscriber(sink, qSize)
   }
 
-  final implicit class publisherToStream[A](val publisher: Publisher[A]) extends AnyVal {
+  final implicit class publisherToStream[A](private val publisher: Publisher[A]) extends AnyVal {
 
     /**
      * Create a `Stream` from a `Publisher`.
@@ -39,7 +40,7 @@ package object reactiveStreams {
       Adapters.publisherToStream(publisher, qSize)
   }
 
-  final implicit class subscriberToSink[A](val subscriber: Subscriber[A]) extends AnyVal {
+  final implicit class subscriberToSink[A](private val subscriber: Subscriber[A]) extends AnyVal {
 
     /**
      * Create a `Sink` from a `Subscriber`. Errors need to be transported via the returned Promise:

@@ -166,8 +166,8 @@ object Adapters {
       override def step(state: Long, a: A): UIO[Step[Long, Nothing]] =
         demand.isShutdown.flatMap {
           case true               => UIO(Step.done(state, Chunk.empty))
-          case false if state > 0 => UIO(subscriber.onNext(a)).map(_ => Step.more(state - 1))
-          case false              => demand.take.flatMap(n => UIO(subscriber.onNext(a)).map(_ => Step.more(n - 1)))
+          case false if state > 0 => UIO(subscriber.onNext(a)).as(Step.more(state - 1))
+          case false              => demand.take.flatMap(n => UIO(subscriber.onNext(a)).as(Step.more(n - 1)))
         }
 
       override def extract(state: Long): UIO[Unit] =
