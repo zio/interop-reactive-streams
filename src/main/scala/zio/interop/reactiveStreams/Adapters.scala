@@ -5,7 +5,6 @@ import zio._
 import zio.stream.{ ZSink, ZStream }
 import zio.stream.ZSink.Step
 import zio.stream.ZStream.Pull
-import org.reactivestreams.{ Subscriber, Subscription }
 
 object Adapters {
 
