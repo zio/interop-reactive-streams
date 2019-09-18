@@ -12,8 +12,8 @@ import zio.test.Assertion._
 
 object SubscriberToSinkSpec
     extends DefaultRunnableSpec(
-      suite("A `Subscriber` converted to a `Sink` correctly")(
-        testM("works on the happy path ") {
+      suite("Converting a `Subscriber` to a `Sink`")(
+        testM("works on the happy path") {
           for {
             probe         <- makeSubscriber
             errorSink     <- probe.underlying.toSink[Throwable]
@@ -30,11 +30,13 @@ object SubscriberToSinkSpec
             probe         <- makeSubscriber
             errorSink     <- probe.underlying.toSink[Throwable]
             (error, sink) = errorSink
-            fiber         <- Stream.fromIterable(seq).++(Stream.fail(e)).run(sink).catchAll(t => error.fail(t)).fork
-            _             <- probe.request(length + 1)
-            elements      <- probe.nextElements(length).run
-            err           <- probe.expectError.run
-            _             <- fiber.join
+            fiber <- (Stream.fromIterable(seq) ++
+                      //         Stream.fromIterable(seq) ++
+                      Stream.fail(e)).run(sink).catchAll(t => error.fail(t)).fork
+            _        <- probe.request(length + 1)
+            elements <- probe.nextElements(length).run
+            err      <- probe.expectError.run
+            _        <- fiber.join
           } yield assert(elements, succeeds(equalTo(seq))) && assert(err, succeeds(equalTo(e)))
         }
       )
@@ -57,6 +59,5 @@ object SubscriberToSinkSpecUtil {
       blocking(Task(underlying.expectCompletion()))
   }
 
-  val testEnv: TestEnvironment = new TestEnvironment(1000)
-  val makeSubscriber           = UIO(new ManualSubscriberWithSubscriptionSupport[Int](testEnv)).map(Probe.apply)
+  val makeSubscriber = UIO(new ManualSubscriberWithSubscriptionSupport[Int](new TestEnvironment(2000))).map(Probe.apply)
 }
