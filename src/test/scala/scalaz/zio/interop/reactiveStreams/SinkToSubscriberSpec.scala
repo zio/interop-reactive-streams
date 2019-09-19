@@ -1,19 +1,16 @@
 package zio.interop.reactiveStreams
 
 import org.reactivestreams.{ Publisher, Subscriber, Subscription }
-import org.reactivestreams.tck.{ SubscriberBlackboxVerification, TestEnvironment }
+import org.reactivestreams.tck.{ SubscriberWhiteboxVerification, TestEnvironment }
+import org.reactivestreams.tck.SubscriberWhiteboxVerification.{ SubscriberPuppet, WhiteboxSubscriberProbe }
+import org.testng.annotations.Test
 import zio.clock.Clock
+import zio.blocking._
 import zio.duration._
 import zio.stream.Sink
 import zio.test._
 import zio.test.Assertion._
-import zio.ZIO
-import zio.Promise
-import zio.UIO
-import zio.ZManaged
-import zio.Task
-import zio.blocking._
-import org.testng.annotations.Test
+import zio.{ Promise, Task, UIO, ZIO, ZManaged }
 
 object SinkToSubscriberSpec
     extends DefaultRunnableSpec(
@@ -92,16 +89,42 @@ object SinkToSubscriberTestUtil {
       }
     } yield (publisher, subscribed, requested, canceled)
 
+  case class ProbedSubscriber[A](underlying: Subscriber[A], probe: WhiteboxSubscriberProbe[A]) extends Subscriber[A] {
+    override def onSubscribe(s: Subscription): Unit = {
+      underlying.onSubscribe(s)
+      probe.registerOnSubscribe(new SubscriberPuppet {
+        override def triggerRequest(elements: Long): Unit = s.request(elements)
+        override def signalCancel(): Unit                 = s.cancel()
+      })
+    }
+
+    override def onNext(element: A): Unit = {
+      underlying.onNext(element)
+      probe.registerOnNext(element)
+    }
+
+    override def onError(cause: Throwable): Unit = {
+      underlying.onError(cause)
+      probe.registerOnError(cause)
+    }
+
+    override def onComplete(): Unit = {
+      underlying.onComplete()
+      probe.registerOnComplete()
+    }
+  }
+
   val managedVerification =
     for {
       (subscriber, _) <- Sink.collectAll[Int].toSubscriber[Clock]()
       sbv <- ZManaged
-              .make[Clock, Throwable, (SubscriberBlackboxVerification[Int], TestEnvironment)] {
+              .make[Clock, Throwable, (SubscriberWhiteboxVerification[Int], TestEnvironment)] {
                 val env = new TestEnvironment(1000, 500)
                 val sbv =
-                  new SubscriberBlackboxVerification[Int](env) {
-                    override def createSubscriber(): Subscriber[Int] = subscriber
-                    override def createElement(element: Int): Int    = element
+                  new SubscriberWhiteboxVerification[Int](env) {
+                    override def createSubscriber(probe: WhiteboxSubscriberProbe[Int]): Subscriber[Int] =
+                      ProbedSubscriber(subscriber, probe)
+                    override def createElement(element: Int): Int = element
                   }
                 UIO(sbv.setUp()) *> UIO(sbv.startPublisherExecutorService()).as((sbv, env))
               } {
@@ -111,7 +134,7 @@ object SinkToSubscriberTestUtil {
     } yield sbv
 
   val tests =
-    classOf[SubscriberBlackboxVerification[Int]]
+    classOf[SubscriberWhiteboxVerification[Int]]
       .getMethods()
       .toList
       .filter { method =>
