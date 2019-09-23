@@ -3,7 +3,6 @@ package zio.interop.reactiveStreams
 import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import zio._
 import zio.stream.{ ZSink, ZStream }
-import zio.stream.ZSink.Step
 import zio.stream.ZStream.Pull
 import org.reactivestreams.{ Subscriber, Subscription }
 
@@ -157,24 +156,25 @@ object Adapters {
   def demandUnfoldSink[A](
     subscriber: Subscriber[_ >: A],
     demand: Queue[Long]
-  ): ZSink[Any, Nothing, Unit, A, Unit] =
-    new ZSink[Any, Nothing, Unit, A, Unit] {
-      override type State = Long
+  ): ZSink[Any, Nothing, Nothing, A, Unit] =
+    new ZSink[Any, Nothing, Nothing, A, Unit] {
 
-      override def initial: UIO[Step[Long, Nothing]] = UIO(Step.more(0L))
+      override type State = (Long, Boolean)
 
-      override def step(state: Long, a: A): UIO[Step[Long, Nothing]] =
+      def cont(state: State): Boolean = state._2
+
+      override def extract(state: State): UIO[(Unit, Chunk[Nothing])] =
+        demand.isShutdown.flatMap(is => UIO(subscriber.onComplete()).when(!is)) *> UIO.succeed(((), Chunk.empty))
+
+      override def initial: UIO[State] = UIO((0L, true))
+
+      override def step(state: State, a: A): UIO[State] =
         demand.isShutdown.flatMap {
-          case true               => UIO(Step.done(state, Chunk.empty))
-          case false if state > 0 => UIO(subscriber.onNext(a)).map(_ => Step.more(state - 1))
-          case false              => demand.take.flatMap(n => UIO(subscriber.onNext(a)).map(_ => Step.more(n - 1)))
+          case true                  => UIO((state._1, false))
+          case false if state._1 > 0 => UIO(subscriber.onNext(a)).map(_ => (state._1 - 1, true))
+          case false                 => demand.take.flatMap(n => UIO(subscriber.onNext(a)).map(_ => (n - 1, true)))
         }
 
-      override def extract(state: Long): UIO[Unit] =
-        demand.isShutdown.flatMap {
-          case true  => UIO.unit
-          case false => UIO(subscriber.onComplete())
-        }
     }
 
   def createSubscription[A](
