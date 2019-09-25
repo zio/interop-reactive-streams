@@ -1,4 +1,4 @@
-import ScalazBuild._
+import BuildHelper._
 
 inThisBuild(
   List(
