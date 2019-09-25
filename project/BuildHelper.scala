@@ -5,7 +5,7 @@ import explicitdeps.ExplicitDepsPlugin.autoImport._
 import sbtbuildinfo._
 import BuildInfoKeys._
 
-object ScalazBuild {
+object BuildHelper {
   val testDeps        = Seq("org.scalacheck"  %% "scalacheck"   % "1.14.1" % "test")
   val compileOnlyDeps = Seq("com.github.ghik" %% "silencer-lib" % "1.4.2"  % "provided")
 
