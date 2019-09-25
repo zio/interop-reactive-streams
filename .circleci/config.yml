@@ -38,14 +38,15 @@ jobs:
       - checkout
       - restore_cache:
           key: sbt-cache-machine
-      - run: sbt ++2.12.8! test
-      - run: sbt ++2.12.8! package packageSrc publishLocal
+      - run: ./sbt ++2.12.8! test
+      - run: ./sbt ++2.12.8! package packageSrc publishLocal
       - save_cache:
           key: sbt-cache-machine
           paths:
             - "~/.ivy2/cache"
             - "~/.sbt"
             - "~/.m2"
+
   test213_jvm_jdk8:
     machine:
       image: ubuntu-1604:201903-01
@@ -53,8 +54,8 @@ jobs:
       - checkout
       - restore_cache:
           key: sbt-cache-machine
-      - run: sbt ++2.13.0! test
-      - run: sbt ++2.13.0! package packageSrc publishLocal
+      - run: ./sbt ++2.13.0! test
+      - run: ./sbt ++2.13.0! package packageSrc publishLocal
       - save_cache:
           key: sbt-cache-machine
           paths:
@@ -72,9 +73,8 @@ jobs:
           key: sbt-cache
       - run: echo -n "${PGP_PUBLIC}" | base64 -d > /tmp/public.asc
       - run: echo -n "${PGP_SECRET}" | base64 -d > /tmp/secret.asc
-      - run: sbt ++2.11.12! releaseEarly
-      - run: sbt ++2.12.8! releaseEarly
-      - run: sbt ++2.13.0! releaseEarly
+      - run: echo "credentials += Credentials(\"Sonatype Nexus Repository Manager\", \"oss.sonatype.org\", \"$SONATYPE_USER\", \"$SONATYPE_PASSWORD\")" > ~/.sbt/1.0/sonatype.sbt
+      - run: ./sbt ++${SCALA_VERSION}! clean sonatypeBundleClean +publishSigned sonatypeBundleRelease
 
 workflows:
   version: 2
