@@ -12,23 +12,23 @@ inThisBuild(
         "john@degoes.net",
         url("http://degoes.net")
       )
+    ),
+    pgpPassphrase := sys.env.get("PGP_PASSWORD").map(_.toArray),
+    pgpPublicRing := file("/tmp/public.asc"),
+    pgpSecretRing := file("/tmp/secret.asc"),
+    scmInfo := Some(
+      ScmInfo(
+        url("https://github.com/zio/interop-reactive-streams/"),
+        "scm:git:git@github.com:zio/interop-reactive-streams.git"
+      )
     )
   )
 )
 
+ThisBuild / publishTo := sonatypePublishToBundle.value
+
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
-
-pgpPublicRing := file("/tmp/public.asc")
-pgpSecretRing := file("/tmp/secret.asc")
-releaseEarlyWith := SonatypePublisher
-scmInfo := Some(
-  ScmInfo(
-    url("https://github.com/zio/interop-reactive-streams/"),
-    "scm:git:git@github.com:zio/interop-reactive-streams.git"
-  )
-)
-
 addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
 
 lazy val reactiveStreams = project
