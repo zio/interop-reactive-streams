@@ -1,55 +1,63 @@
 package zio.interop.reactiveStreams
 
-import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
-import akka.stream.scaladsl.{ Keep, Sink, Source }
-import akka.stream.testkit.TestSubscriber
-import org.specs2.specification.AfterAll
-import org.specs2.specification.core.SpecStructure
+import org.reactivestreams.tck.TestEnvironment
+import org.reactivestreams.tck.TestEnvironment.ManualSubscriberWithSubscriptionSupport
+import scala.jdk.CollectionConverters._
+import zio.{ Task, UIO, ZIO }
+import zio.blocking._
+import zio.interop.reactiveStreams.SubscriberToSinkSpecUtil._
 import zio.stream.Stream
-import zio.{ BaseCrossPlatformSpec, Task, UIO }
+import zio.test._
+import zio.test.Assertion._
 
-class SubscriberToSinkSpec extends BaseCrossPlatformSpec with AfterAll {
-
-  def is: SpecStructure =
-    "SubscriberToSinkSpec".title ^ s2"""
-   Check if a `Subscriber` converted to a `Sink` correctly
-     works on the happy path $e1
-     transports errors $e2
-    """
-  implicit private val system: ActorSystem             = ActorSystem()
-  implicit private val materializer: ActorMaterializer = ActorMaterializer()
-
-  override def afterAll(): Unit =
-    unsafeRun(UIO(materializer.shutdown()) *> Task.fromFuture(_ => system.terminate()).unit)
-
-  private val seq = List.range(0, 100)
-  private val e   = new RuntimeException("boom")
-
-  private val e1 = {
-    unsafeRun(
-      for {
-        subSeqF       <- UIO(Source.asSubscriber[Int].toMat(Sink.seq)(Keep.both).run())
-        (sub, seqF)   = subSeqF
-        errorSink     <- sub.toSink[Throwable]
-        (error, sink) = errorSink
-        _             <- Stream.fromIterable(seq).run(sink).catchAll(t => error.fail(t)).fork
-        r             <- Task.fromFuture(_ => seqF)
-      } yield r must_== seq
+object SubscriberToSinkSpec
+    extends DefaultRunnableSpec(
+      suite("Converting a `Subscriber` to a `Sink`")(
+        testM("works on the happy path") {
+          for {
+            probe         <- makeSubscriber
+            errorSink     <- probe.underlying.toSink[Throwable]
+            (error, sink) = errorSink
+            fiber         <- Stream.fromIterable(seq).run(sink).catchAll(t => error.fail(t)).fork
+            _             <- probe.request(length + 1)
+            elements      <- probe.nextElements(length).run
+            completion    <- probe.expectCompletion.run
+            _             <- fiber.join
+          } yield assert(elements, succeeds(equalTo(seq))) && assert(completion, succeeds(isUnit))
+        },
+        testM("transports errors") {
+          for {
+            probe         <- makeSubscriber
+            errorSink     <- probe.underlying.toSink[Throwable]
+            (error, sink) = errorSink
+            fiber <- (Stream.fromIterable(seq) ++
+                      //         Stream.fromIterable(seq) ++
+                      Stream.fail(e)).run(sink).catchAll(t => error.fail(t)).fork
+            _        <- probe.request(length + 1)
+            elements <- probe.nextElements(length).run
+            err      <- probe.expectError.run
+            _        <- fiber.join
+          } yield assert(elements, succeeds(equalTo(seq))) && assert(err, succeeds(equalTo(e)))
+        }
+      )
     )
+
+object SubscriberToSinkSpecUtil {
+  // ManualSubscriberWithSubscriptionSupport has an internal buffer of at most 32 elements.
+  val seq: List[Int] = List.range(0, 31)
+  val length: Long   = seq.length.toLong
+  val e: Throwable   = new RuntimeException("boom")
+
+  case class Probe[T](underlying: ManualSubscriberWithSubscriptionSupport[T]) {
+    def request(n: Long): UIO[Unit] =
+      UIO(underlying.request(n))
+    def nextElements(n: Long): ZIO[Blocking, Throwable, List[T]] =
+      blocking(Task(underlying.nextElements(n.toLong).asScala.toList))
+    def expectError: ZIO[Blocking, Throwable, Throwable] =
+      blocking(Task(underlying.expectError(classOf[Throwable])))
+    def expectCompletion: ZIO[Blocking, Throwable, Unit] =
+      blocking(Task(underlying.expectCompletion()))
   }
 
-  private val e2 =
-    unsafeRun(
-      for {
-        probe         <- UIO(TestSubscriber.manualProbe[Int]())
-        errorSink     <- probe.toSink[Throwable]
-        (error, sink) = errorSink
-        _             <- Stream.fromIterable(seq).++(Stream.fail(e)).run(sink).catchAll(t => error.fail(t)).fork
-        subscription  <- Task(probe.expectSubscription())
-        _             <- UIO(subscription.request(101))
-        _             <- Task(probe.expectNextN(seq))
-        _             <- Task(probe.expectError(e))
-      } yield success
-    )
+  val makeSubscriber = UIO(new ManualSubscriberWithSubscriptionSupport[Int](new TestEnvironment(2000))).map(Probe.apply)
 }
