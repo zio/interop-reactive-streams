@@ -39,10 +39,10 @@ lazy val reactiveStreams = project
   .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
   .settings(
     libraryDependencies ++= Seq(
-      "dev.zio"                %% "zio"                     % "1.0.0-RC13",
-      "dev.zio"                %% "zio-streams"             % "1.0.0-RC13",
-      "dev.zio"                %% "zio-test"                % "1.0.0-RC13" % Test,
-      "dev.zio"                %% "zio-test-sbt"            % "1.0.0-RC13" % Test,
+      "dev.zio"                %% "zio"                     % "1.0.0-RC14",
+      "dev.zio"                %% "zio-streams"             % "1.0.0-RC14",
+      "dev.zio"                %% "zio-test"                % "1.0.0-RC14" % Test,
+      "dev.zio"                %% "zio-test-sbt"            % "1.0.0-RC14" % Test,
       "org.reactivestreams"    % "reactive-streams"         % "1.0.3",
       "org.reactivestreams"    % "reactive-streams-tck"     % "1.0.3" % Test,
       "org.scala-lang.modules" %% "scala-collection-compat" % "2.1.2" % Test
