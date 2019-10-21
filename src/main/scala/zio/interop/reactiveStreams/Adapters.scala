@@ -38,7 +38,7 @@ object Adapters {
     } yield (error, demandUnfoldSink(subscriber, demand))
 
   def publisherToStream[A](publisher: Publisher[A], bufferSize: Int): ZStream[Any, Throwable, A] =
-    new ZStream(
+    ZStream(
       for {
         (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
         _                                         <- UIO(publisher.subscribe(subscriber)).toManaged_
@@ -55,7 +55,7 @@ object Adapters {
     for {
       (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
       result                                    <- Promise.make[Throwable, B].toManaged_
-      _ <- new ZStream(for {
+      _ <- ZStream(for {
             sub <- subscription.await.interruptible
                     .toManaged(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_)))
             process <- process(q, sub, completion)
