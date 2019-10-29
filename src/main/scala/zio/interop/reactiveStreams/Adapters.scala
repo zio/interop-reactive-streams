@@ -42,8 +42,9 @@ object Adapters {
       for {
         (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
         _                                         <- UIO(publisher.subscribe(subscriber)).toManaged_
-        sub <- subscription.await.interruptible
-                .toManaged(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_)))
+        sub <- ZManaged
+                .fromEffect(subscription.await)
+                .onExitFirst(_.foreach(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_))))
         process <- process(q, sub, completion)
       } yield process
     )
@@ -56,8 +57,9 @@ object Adapters {
       (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
       result                                    <- Promise.make[Throwable, B].toManaged_
       _ <- ZStream(for {
-            sub <- subscription.await.interruptible
-                    .toManaged(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_)))
+            sub <- ZManaged
+                    .fromEffect(subscription.await)
+                    .onExitFirst(_.foreach(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_))))
             process <- process(q, sub, completion)
           } yield process)
             .run(sink)
