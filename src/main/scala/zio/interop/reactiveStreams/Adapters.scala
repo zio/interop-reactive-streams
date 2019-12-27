@@ -93,11 +93,13 @@ object Adapters {
       val requestAndTake = demand.modify(d => (sub.request(capacity - d), capacity - 1)) *> q.take.flatMap(Pull.emit)
       val take           = demand.update(_ - 1) *> q.take.flatMap(Pull.emit)
 
-      q.size.flatMap { n =>
-        if (n <= 0) completion.isDone.flatMap {
-          case true  => completion.await.foldM(Pull.fail, _ => Pull.end)
-          case false => demand.get.flatMap(d => if (d < capacity) requestAndTake else take)
-        } else take
+      q.size.flatMap {
+        case n if n <= 0 =>
+          completion.isDone.flatMap {
+            case true  => completion.await.foldM(Pull.fail, _ => Pull.end)
+            case false => demand.get.flatMap(d => if (d < capacity) requestAndTake else take)
+          }
+        case _ => take
       }.orElse(
         completion.poll.flatMap {
           case None     => Pull.end
