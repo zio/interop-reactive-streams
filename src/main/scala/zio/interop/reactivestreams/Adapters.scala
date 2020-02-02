@@ -1,4 +1,4 @@
-package zio.interop.reactiveStreams
+package zio.interop.reactivestreams
 
 import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import zio._

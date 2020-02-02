@@ -1,11 +1,11 @@
-package zio.interop.reactiveStreams
+package zio.interop.reactivestreams
 
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualSubscriberWithSubscriptionSupport
 import scala.jdk.CollectionConverters._
 import zio.{ Task, UIO, ZIO }
 import zio.blocking._
-import zio.interop.reactiveStreams.SubscriberToSinkSpecUtil._
+import zio.interop.reactivestreams.SubscriberToSinkSpecUtil._
 import zio.stream.Stream
 import zio.test._
 import zio.test.Assertion._

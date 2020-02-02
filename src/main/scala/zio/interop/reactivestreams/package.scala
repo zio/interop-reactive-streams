@@ -4,7 +4,7 @@ import org.reactivestreams.{ Publisher, Subscriber }
 import zio.stream.{ ZSink, ZStream }
 import zio.{ IO, Promise, UIO, ZIO, ZManaged }
 
-package object reactiveStreams {
+package object reactivestreams {
 
   final implicit class streamToPublisher[R, E <: Throwable, A](private val stream: ZStream[R, E, A]) extends AnyVal {
 
