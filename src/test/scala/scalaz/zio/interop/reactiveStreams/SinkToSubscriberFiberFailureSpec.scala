@@ -5,7 +5,6 @@ import zio.internal.PlatformLive
 import zio.test._
 import zio.test.Assertion._
 import zio.test.environment.TestEnvironment
-import zio.UIO
 
 object SinkToSubscriberFiberFailureSpecUtil {
 
@@ -31,7 +30,9 @@ object SinkToSubscriberFiberFailureSpec
               }
             )
         }
-        assertM(publisher.toStream().runDrain.run, fails(anything)) *>
-          assertM(UIO(SinkToSubscriberFiberFailureSpecUtil.fibersFailed), equalTo(0))
+        for {
+          exit <- publisher.toStream().runDrain.run
+        } yield assert(exit, fails(anything)) &&
+          assert(SinkToSubscriberFiberFailureSpecUtil.fibersFailed, equalTo(0))
       }
     )
