@@ -7,6 +7,12 @@ inThisBuild(
     licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
     developers := List(
       Developer(
+        "runtologist",
+        "Simon Schenk",
+        "simon@schenk-online.net",
+        url("https://github.com/runtologist")
+      ),
+      Developer(
         "jdegoes",
         "John De Goes",
         "john@degoes.net",
@@ -24,8 +30,6 @@ inThisBuild(
     )
   )
 )
-
-ThisBuild / publishTo := sonatypePublishToBundle.value
 
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
