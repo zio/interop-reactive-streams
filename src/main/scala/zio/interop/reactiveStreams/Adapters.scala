@@ -83,8 +83,11 @@ object Adapters {
     completion: Promise[Throwable, Unit]
   ): ZManaged[R, Throwable, Pull[Any, Throwable, A]] =
     for {
-      _      <- ZManaged.finalizer(q.shutdown)
-      _      <- completion.await.ensuring(q.size.flatMap(n => if (n <= 0) q.shutdown else UIO.unit)).fork.toManaged_
+      _ <- ZManaged.finalizer(q.shutdown)
+      _ <- completion.await.run
+            .ensuring(q.size.flatMap(n => if (n <= 0) q.shutdown else UIO.unit))
+            .toManaged_
+            .fork
       demand <- Ref.make(0L).toManaged_
     } yield {
 
