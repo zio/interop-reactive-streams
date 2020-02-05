@@ -35,10 +35,10 @@ addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
 addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
 
-lazy val reactiveStreams = project
+lazy val interopReactiveStreams = project
   .in(file("."))
   .enablePlugins(BuildInfoPlugin)
-  .settings(stdSettings("zio-interop-reactiveStreams"))
+  .settings(stdSettings("zio-interop-reactivestreams"))
   .settings(buildInfoSettings)
   .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
   .settings(

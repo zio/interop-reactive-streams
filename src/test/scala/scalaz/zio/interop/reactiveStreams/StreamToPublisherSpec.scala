@@ -1,4 +1,4 @@
-package zio.interop.reactiveStreams
+package zio.interop.reactivestreams
 
 import java.lang.reflect.InvocationTargetException
 import org.reactivestreams.Publisher

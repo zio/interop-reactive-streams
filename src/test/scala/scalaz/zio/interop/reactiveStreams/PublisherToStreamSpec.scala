@@ -1,9 +1,9 @@
-package zio.interop.reactiveStreams
+package zio.interop.reactivestreams
 
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualPublisher
 import zio.{ Exit, Task, UIO }
-import zio.interop.reactiveStreams.PublisherToStreamSpecUtil._
+import zio.interop.reactivestreams.PublisherToStreamSpecUtil._
 import zio.stream.Sink
 import zio.test._
 import zio.test.Assertion._
