@@ -49,6 +49,6 @@ lazy val interopReactiveStreams = project
       "dev.zio"                %% "zio-test-sbt"            % "1.0.0-RC17" % Test,
       "org.reactivestreams"    % "reactive-streams"         % "1.0.3",
       "org.reactivestreams"    % "reactive-streams-tck"     % "1.0.3" % Test,
-      "org.scala-lang.modules" %% "scala-collection-compat" % "2.1.3" % Test
+      "org.scala-lang.modules" %% "scala-collection-compat" % "2.1.4" % Test
     )
   )
