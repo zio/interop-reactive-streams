@@ -35,6 +35,10 @@ addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
 addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
 
+val zioVersion        = "1.0.0-RC17+437-68ccb44d-SNAPSHOT"
+val rsVersion         = "1.0.3"
+val collCompatVersion = "2.1.4"
+
 lazy val interopReactiveStreams = project
   .in(file("."))
   .enablePlugins(BuildInfoPlugin)
@@ -42,13 +46,14 @@ lazy val interopReactiveStreams = project
   .settings(buildInfoSettings)
   .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
   .settings(
+    resolvers += Resolver.sonatypeRepo("snapshots"),
     libraryDependencies ++= Seq(
-      "dev.zio"                %% "zio"                     % "1.0.0-RC17",
-      "dev.zio"                %% "zio-streams"             % "1.0.0-RC17",
-      "dev.zio"                %% "zio-test"                % "1.0.0-RC17" % Test,
-      "dev.zio"                %% "zio-test-sbt"            % "1.0.0-RC17" % Test,
-      "org.reactivestreams"    % "reactive-streams"         % "1.0.3",
-      "org.reactivestreams"    % "reactive-streams-tck"     % "1.0.3" % Test,
-      "org.scala-lang.modules" %% "scala-collection-compat" % "2.1.4" % Test
+      "dev.zio"                %% "zio"                     % zioVersion,
+      "dev.zio"                %% "zio-streams"             % zioVersion,
+      "dev.zio"                %% "zio-test"                % zioVersion % Test,
+      "dev.zio"                %% "zio-test-sbt"            % zioVersion % Test,
+      "org.reactivestreams"    % "reactive-streams"         % rsVersion,
+      "org.reactivestreams"    % "reactive-streams-tck"     % rsVersion % Test,
+      "org.scala-lang.modules" %% "scala-collection-compat" % collCompatVersion % Test
     )
   )

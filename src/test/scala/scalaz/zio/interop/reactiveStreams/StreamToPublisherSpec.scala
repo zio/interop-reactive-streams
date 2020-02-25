@@ -12,14 +12,11 @@ import zio.stream.Stream
 import zio.test._
 import zio.test.Assertion._
 
-object StreamToPublisherSpec
-    extends DefaultRunnableSpec(
-      suite("Converting a `Stream` to a `Publisher`")(
-        suite("passes all required and optional TCK tests")(StreamToPublisherTestUtil.tests: _*)
-      )
+object StreamToPublisherSpec extends DefaultRunnableSpec {
+  override def spec =
+    suite("Converting a `Stream` to a `Publisher`")(
+      suite("passes all required and optional TCK tests")(tests: _*)
     )
-
-object StreamToPublisherTestUtil {
 
   def makePV(runtime: zio.Runtime[Any]) =
     new PublisherVerification[Int](new TestEnvironment(2000, 500), 2000L) {
@@ -51,7 +48,7 @@ object StreamToPublisherTestUtil {
       }
       .collect {
         case method if method.getName().startsWith("untested") =>
-          test(method.getName())(assert((), anything)) @@ TestAspect.ignore
+          test(method.getName())(assert(())(anything)) @@ TestAspect.ignore
         case method =>
           testM(method.getName())(
             for {
@@ -61,7 +58,7 @@ object StreamToPublisherTestUtil {
               r <- blocking(Task(method.invoke(pv))).unit.mapError {
                     case e: InvocationTargetException => e.getTargetException()
                   }.run
-            } yield assert(r, succeeds(isUnit))
+            } yield assert(r)(succeeds(isUnit))
           )
       }
 }
