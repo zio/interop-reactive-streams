@@ -57,18 +57,12 @@ object Adapters {
     for {
       (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
       result                                    <- Promise.make[Throwable, B].toManaged_
-      _ <- ZStream((for {
-            sub <- ZManaged
-                    .fromEffect(subscription.await)
-                    .onExitFirst(_.foreach(sub => UIO(sub.cancel()).whenM(completion.isDone.map(!_))))
-            process <- process(q, sub, completion)
-          } yield process).catchAll(e => UIO(Pull.fail(e)).toManaged_))
-            .run(sink)
-            .to(result)
-            .interruptible // `to` is not interruptible by default
-            .fork
-            .toManaged(_.interrupt)
-    } yield (subscriber, result.await)
+      pull = subscription.await.toManaged_
+        .onExitFirst(_.foreach(sub => UIO(sub.cancel()).whenM(completion.isDone.map(!_))))
+        .flatMap(process(q, _, completion))
+        .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
+      fiber <- ZStream(pull).run(sink).forkManaged
+    } yield (subscriber, fiber.join)
 
   /*
    * Unfold q. When `onComplete` or `onError` is signalled, take the remaining values from `q`, then shut down.
