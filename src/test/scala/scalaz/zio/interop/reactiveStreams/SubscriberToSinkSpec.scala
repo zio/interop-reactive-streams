@@ -23,7 +23,7 @@ object SubscriberToSinkSpec
             elements      <- probe.nextElements(length).run
             completion    <- probe.expectCompletion.run
             _             <- fiber.join
-          } yield assert(elements, succeeds(equalTo(seq))) && assert(completion, succeeds(isUnit))
+          } yield assert(elements)(succeeds(equalTo(seq))) && assert(completion)(succeeds(isUnit))
         },
         testM("transports errors") {
           for {
@@ -37,7 +37,7 @@ object SubscriberToSinkSpec
             elements <- probe.nextElements(length).run
             err      <- probe.expectError.run
             _        <- fiber.join
-          } yield assert(elements, succeeds(equalTo(seq))) && assert(err, succeeds(equalTo(e)))
+          } yield assert(elements)(succeeds(equalTo(seq))) && assert(err)(succeeds(equalTo(e)))
         }
       )
     )
