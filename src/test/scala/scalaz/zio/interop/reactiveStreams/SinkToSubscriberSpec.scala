@@ -25,11 +25,11 @@ object SinkToSubscriberSpec
                         case (subscriber, r) => UIO(publisher.subscribe(subscriber)) *> r
                       }
                       .fork
-            _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run, succeeds(isUnit))
-            _ <- assertM(requested.await.timeoutFail("timeout awaiting request.")(500.millis).run, succeeds(isUnit))
-            _ <- assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run, succeeds(isUnit))
+            _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
+            _ <- assertM(requested.await.timeoutFail("timeout awaiting request.")(500.millis).run)(succeeds(isUnit))
+            _ <- assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run)(succeeds(isUnit))
             r <- fiber.join.run
-          } yield assert(r, succeeds(equalTo(List(1, 2, 3, 4, 5))))
+          } yield assert(r)(succeeds(equalTo(List(1, 2, 3, 4, 5))))
         ),
         testM("cancels subscription on interruption after subscription")(
           for {
@@ -38,11 +38,11 @@ object SinkToSubscriberSpec
                       .toSubscriber()
                       .use { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
                       .fork
-            _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run, succeeds(isUnit))
+            _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
             _ <- fiber.interrupt
-            _ <- assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run, succeeds(isUnit))
+            _ <- assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run)(succeeds(isUnit))
             r <- fiber.join.run
-          } yield assert(r, isInterrupted)
+          } yield assert(r)(isInterrupted)
         ),
         testM("cancels subscription on interruption during consuption")(
           for {
@@ -51,12 +51,12 @@ object SinkToSubscriberSpec
                       .toSubscriber()
                       .use { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
                       .fork
-            _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run, succeeds(isUnit))
-            _ <- assertM(requested.await.timeoutFail("timeout awaiting request.")(500.millis).run, succeeds(isUnit))
+            _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
+            _ <- assertM(requested.await.timeoutFail("timeout awaiting request.")(500.millis).run)(succeeds(isUnit))
             _ <- fiber.interrupt
-            _ <- assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run, succeeds(isUnit))
+            _ <- assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run)(succeeds(isUnit))
             r <- fiber.join.run
-          } yield assert(r, isInterrupted)
+          } yield assert(r)(isInterrupted)
         ),
         testM("Does not fail a fiber on failing Publisher") {
           val publisher = new Publisher[Int] {
@@ -72,7 +72,7 @@ object SinkToSubscriberSpec
             var fibersFailed = 0
             val testRuntime  = runtime.mapPlatform(_.withReportFailure(_ => fibersFailed += 1))
             val exit         = testRuntime.unsafeRun(publisher.toStream().runDrain.run)
-            assert(exit, fails(anything)) && assert(fibersFailed, equalTo(0))
+            assert(exit)(fails(anything)) && assert(fibersFailed)(equalTo(0))
           }
         },
         suite("passes all required and optional TCK tests")(
@@ -161,7 +161,7 @@ object SinkToSubscriberTestUtil {
       }
       .collect {
         case method if method.getName().startsWith("untested") =>
-          test(method.getName())(assert((), anything)) @@ TestAspect.ignore
+          test(method.getName())(assert(())(anything)) @@ TestAspect.ignore
         case method =>
           testM(method.getName())(
             for {
@@ -169,7 +169,7 @@ object SinkToSubscriberTestUtil {
                     case (sbv, env) =>
                       blocking(Task(method.invoke(sbv))).timeout(env.defaultTimeoutMillis().millis)
                   }.unit.run
-            } yield assert(r, succeeds(isUnit))
+            } yield assert(r)(succeeds(isUnit))
           )
       }
 

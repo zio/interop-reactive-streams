@@ -51,7 +51,7 @@ object StreamToPublisherTestUtil {
       }
       .collect {
         case method if method.getName().startsWith("untested") =>
-          test(method.getName())(assert((), anything)) @@ TestAspect.ignore
+          test(method.getName())(assert(())(anything)) @@ TestAspect.ignore
         case method =>
           testM(method.getName())(
             for {
@@ -61,7 +61,7 @@ object StreamToPublisherTestUtil {
               r <- blocking(Task(method.invoke(pv))).unit.mapError {
                     case e: InvocationTargetException => e.getTargetException()
                   }.run
-            } yield assert(r, succeeds(isUnit))
+            } yield assert(r)(succeeds(isUnit))
           )
       }
 }
