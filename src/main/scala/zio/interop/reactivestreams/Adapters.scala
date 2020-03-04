@@ -19,7 +19,7 @@ object Adapters {
             _ <- stream
                   .run(demandUnfoldSink(subscriber, demand))
                   .catchAll(e => UIO(subscriber.onError(e)))
-                  .fork
+                  .forkDaemon
           } yield ()
         )
       }
@@ -34,7 +34,7 @@ object Adapters {
       error        <- Promise.make[E, Nothing]
       subscription = createSubscription(subscriber, demand, runtime)
       _            <- UIO(subscriber.onSubscribe(subscription))
-      _            <- error.await.catchAll(t => UIO(subscriber.onError(t)) *> demand.shutdown).fork
+      _            <- error.await.catchAll(t => UIO(subscriber.onError(t)) *> demand.shutdown).forkDaemon
     } yield (error, demandUnfoldSink(subscriber, demand))
 
   def publisherToStream[A](publisher: Publisher[A], bufferSize: Int): ZStream[Any, Throwable, A] = {
