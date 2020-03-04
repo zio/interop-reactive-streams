@@ -53,15 +53,15 @@ object Adapters {
   def sinkToSubscriber[R, R1 <: R, A1, A, B](
     sink: ZSink[R, Throwable, A1, A, B],
     bufferSize: Int
-  ): ZManaged[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
+  ): ZIO[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
     for {
-      (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
-      result                                    <- Promise.make[Throwable, B].toManaged_
+      (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize)
+      result                                    <- Promise.make[Throwable, B]
       pull = subscription.await.toManaged_
         .onExitFirst(_.foreach(sub => UIO(sub.cancel()).whenM(completion.isDone.map(!_))))
         .flatMap(process(q, _, completion))
         .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
-      fiber <- ZStream(pull).run(sink).forkManaged
+      fiber <- ZStream(pull).run(sink).fork
     } yield (subscriber, fiber.join)
 
   /*

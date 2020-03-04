@@ -21,7 +21,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
           fiber <- Sink
                     .collectAllN[Int](5)
                     .toSubscriber()
-                    .use {
+                    .flatMap {
                       case (subscriber, r) => UIO(publisher.subscribe(subscriber)) *> r
                     }
                     .fork
@@ -36,7 +36,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
           (publisher, subscribed, _, canceled) <- makePublisherProbe
           fiber <- Sink.drain
                     .toSubscriber()
-                    .use { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
+                    .flatMap { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
                     .fork
           _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
           _ <- fiber.interrupt
@@ -49,7 +49,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
           (publisher, subscribed, requested, canceled) <- makePublisherProbe
           fiber <- Sink.drain
                     .toSubscriber()
-                    .use { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
+                    .flatMap { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
                     .fork
           _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
           _ <- assertM(requested.await.timeoutFail("timeout awaiting request.")(500.millis).run)(succeeds(isUnit))
@@ -130,7 +130,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
 
   val managedVerification =
     for {
-      (subscriber, _) <- Sink.collectAll[Int].toSubscriber[Clock]()
+      (subscriber, _) <- Sink.collectAll[Int].toSubscriber[Clock]().toManaged_
       sbv <- ZManaged.make {
               val env = new TestEnvironment(1000, 500)
               val sbv =
