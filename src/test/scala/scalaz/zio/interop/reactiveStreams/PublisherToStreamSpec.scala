@@ -1,8 +1,11 @@
 package zio.interop.reactivestreams
 
+import org.reactivestreams.Publisher
+import org.reactivestreams.Subscriber
+import org.reactivestreams.Subscription
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualPublisher
-import zio.{ Exit, Task, UIO }
+import zio.{ Exit, Task, UIO, ZIO }
 import zio.stream.Sink
 import zio.test._
 import zio.test.Assertion._
@@ -19,6 +22,23 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
       },
       testM("fails with an eventually failing `Publisher`") {
         assertM(publish(seq, Some(e)))(fails(equalTo(e)))
+      },
+      testM("Does not fail a fiber on failing `Publisher`") {
+        val publisher = new Publisher[Int] {
+          override def subscribe(s: Subscriber[_ >: Int]): Unit =
+            s.onSubscribe(
+              new Subscription {
+                override def request(n: Long): Unit = s.onError(new Throwable("boom!"))
+                override def cancel(): Unit         = ()
+              }
+            )
+        }
+        ZIO.runtime[Any].map { runtime =>
+          var fibersFailed = 0
+          val testRuntime  = runtime.mapPlatform(_.withReportFailure(e => if (!e.interruptedOnly) fibersFailed += 1))
+          val exit         = testRuntime.unsafeRun(publisher.toStream().runDrain.run)
+          assert(exit)(fails(anything)) && assert(fibersFailed)(equalTo(0))
+        }
       },
       testM("cancels subscription when interrupted before subscription") {
         for {

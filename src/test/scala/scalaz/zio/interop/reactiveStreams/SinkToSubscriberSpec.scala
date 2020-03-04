@@ -58,23 +58,6 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
           r <- fiber.join.run
         } yield assert(r)(isInterrupted)
       ),
-      testM("Does not fail a fiber on failing Publisher") {
-        val publisher = new Publisher[Int] {
-          override def subscribe(s: Subscriber[_ >: Int]): Unit =
-            s.onSubscribe(
-              new Subscription {
-                override def request(n: Long): Unit = s.onError(new Throwable("boom!"))
-                override def cancel(): Unit         = ()
-              }
-            )
-        }
-        ZIO.runtime[Any].map { runtime =>
-          var fibersFailed = 0
-          val testRuntime  = runtime.mapPlatform(_.withReportFailure(_ => fibersFailed += 1))
-          val exit         = testRuntime.unsafeRun(publisher.toStream().runDrain.run)
-          assert(exit)(fails(anything)) && assert(fibersFailed)(equalTo(0))
-        }
-      },
       suite("passes all required and optional TCK tests")(
         tests: _*
       )
