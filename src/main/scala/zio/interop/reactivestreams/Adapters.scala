@@ -56,7 +56,6 @@ object Adapters {
   ): ZIO[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
     for {
       (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize)
-      result                                    <- Promise.make[Throwable, B]
       pull = subscription.await.toManaged_
         .onExitFirst(_.foreach(sub => UIO(sub.cancel()).whenM(completion.isDone.map(!_))))
         .flatMap(process(q, _, completion))
