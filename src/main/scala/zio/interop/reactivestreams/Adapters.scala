@@ -19,7 +19,7 @@ object Adapters {
             _ <- stream
                   .run(demandUnfoldSink(subscriber, demand))
                   .catchAll(e => UIO(subscriber.onError(e)))
-                  .fork
+                  .forkDaemon
           } yield ()
         )
       }
@@ -34,40 +34,34 @@ object Adapters {
       error        <- Promise.make[E, Nothing]
       subscription = createSubscription(subscriber, demand, runtime)
       _            <- UIO(subscriber.onSubscribe(subscription))
-      _            <- error.await.catchAll(t => UIO(subscriber.onError(t)) *> demand.shutdown).fork
+      _            <- error.await.catchAll(t => UIO(subscriber.onError(t)) *> demand.shutdown).forkDaemon
     } yield (error, demandUnfoldSink(subscriber, demand))
 
-  def publisherToStream[A](publisher: Publisher[A], bufferSize: Int): ZStream[Any, Throwable, A] =
-    ZStream(
-      for {
-        (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
-        _                                         <- UIO(publisher.subscribe(subscriber)).toManaged_
-        sub <- ZManaged
-                .fromEffect(subscription.await)
-                .onExitFirst(_.foreach(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_))))
-        process <- process(q, sub, completion)
-      } yield process
-    )
+  def publisherToStream[A](publisher: Publisher[A], bufferSize: Int): ZStream[Any, Throwable, A] = {
+    val pullOrFail = for {
+      (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
+      _                                         <- UIO(publisher.subscribe(subscriber)).toManaged_
+      sub <- ZManaged
+              .fromEffect(subscription.await)
+              .onExitFirst(_.foreach(sub => UIO(sub.cancel()).whenM(completion.isDone.map(!_))))
+      process <- process(q, sub, completion)
+    } yield process
+    val pull = pullOrFail.catchAll(e => UIO(Pull.fail(e)).toManaged_)
+    ZStream.apply(pull)
+  }
 
   def sinkToSubscriber[R, R1 <: R, A1, A, B](
     sink: ZSink[R, Throwable, A1, A, B],
     bufferSize: Int
-  ): ZManaged[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
+  ): ZIO[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
     for {
-      (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
-      result                                    <- Promise.make[Throwable, B].toManaged_
-      _ <- ZStream(for {
-            sub <- ZManaged
-                    .fromEffect(subscription.await)
-                    .onExitFirst(_.foreach(sub => UIO { sub.cancel() }.whenM(completion.isDone.map(!_))))
-            process <- process(q, sub, completion)
-          } yield process)
-            .run(sink)
-            .to(result)
-            .interruptible // `to` is not interruptible by default
-            .fork
-            .toManaged(_.interrupt)
-    } yield (subscriber, result.await)
+      (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize)
+      pull = subscription.await.toManaged_
+        .onExitFirst(_.foreach(sub => UIO(sub.cancel()).whenM(completion.isDone.map(!_))))
+        .flatMap(process(q, _, completion))
+        .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
+      fiber <- ZStream(pull).run(sink).fork
+    } yield (subscriber, fiber.join)
 
   /*
    * Unfold q. When `onComplete` or `onError` is signalled, take the remaining values from `q`, then shut down.
@@ -81,7 +75,7 @@ object Adapters {
     q: Queue[A],
     sub: Subscription,
     completion: Promise[Throwable, Unit]
-  ): ZManaged[R, Throwable, Pull[Any, Throwable, A]] =
+  ): ZManaged[R, Nothing, Pull[Any, Throwable, A]] =
     for {
       _ <- ZManaged.finalizer(q.shutdown)
       _ <- completion.await.run
@@ -93,20 +87,21 @@ object Adapters {
 
       val capacity: Long = q.capacity.toLong
 
-      val requestAndTake = demand.modify(d => (sub.request(capacity - d), capacity - 1)) *> q.take.flatMap(Pull.emit)
-      val take           = demand.update(_ - 1) *> q.take.flatMap(Pull.emit)
+      val requestAndTake =
+        demand.modify(d => (sub.request(capacity - d), capacity - 1)) *> q.take.flatMap(a => Pull.emit(a))
+      val take = demand.update(_ - 1) *> q.take.flatMap(a => Pull.emit(a))
 
       q.size.flatMap {
         case n if n <= 0 =>
           completion.isDone.flatMap {
-            case true  => completion.await.foldM(Pull.fail, _ => Pull.end)
+            case true  => completion.await.foldM(e => Pull.fail(e), _ => Pull.end)
             case false => demand.get.flatMap(d => if (d < capacity) requestAndTake else take)
           }
         case _ => take
       }.orElse(
         completion.poll.flatMap {
           case None     => Pull.end
-          case Some(io) => io.foldM(Pull.fail, _ => Pull.end)
+          case Some(io) => io.foldM(e => Pull.fail(e), _ => Pull.end)
         }
       )
     }
