@@ -6,7 +6,9 @@ import org.reactivestreams.Subscription
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualPublisher
 import zio.{ Exit, Task, UIO, ZIO }
+import zio.duration._
 import zio.stream.Sink
+import zio.stream.Stream
 import zio.test._
 import zio.test.Assertion._
 
@@ -23,7 +25,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
       testM("fails with an eventually failing `Publisher`") {
         assertM(publish(seq, Some(e)))(fails(equalTo(e)))
       },
-      testM("Does not fail a fiber on failing `Publisher`") {
+      testM("does not fail a fiber on failing `Publisher`") {
         val publisher = new Publisher[Int] {
           override def subscribe(s: Subscriber[_ >: Int]): Unit =
             s.onSubscribe(
@@ -40,6 +42,24 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           assert(exit)(fails(anything)) && assert(fibersFailed)(equalTo(0))
         }
       },
+      testM("does not freeze on stream end") {
+        for {
+          probe <- makeProbe
+          fiber <- Stream
+                    .fromEffect(
+                      UIO(
+                        probe.toStream()
+                      )
+                    )
+                    .flatMap(identity)
+                    .run(Sink.collectAll[Int])
+                    .fork
+          _ <- Task(probe.expectRequest())
+          _ <- UIO(probe.sendNext(1))
+          _ <- UIO(probe.sendCompletion)
+          r <- fiber.join
+        } yield assert(r)(equalTo(List(1)))
+      } @@ TestAspect.timeout(1000.millis),
       testM("cancels subscription when interrupted before subscription") {
         for {
           probe <- makeProbe
