@@ -98,11 +98,17 @@ object Adapters {
             case false => demand.get.flatMap(d => if (d < capacity) requestAndTake else take)
           }
         case _ => take
-      }.orElse(
-        completion.poll.flatMap {
-          case None     => Pull.end
-          case Some(io) => io.foldM(e => Pull.fail(e), _ => Pull.end)
-        }
+      }.foldCauseM(
+        cause =>
+          if (cause.interruptedOnly) {
+            completion.poll.flatMap {
+              case None     => Pull.end
+              case Some(io) => io.foldM(e => Pull.fail(e), _ => Pull.end)
+            }
+          } else {
+            ZIO.halt(cause)
+          },
+        UIO.succeed(_)
       )
     }
 
