@@ -37,7 +37,7 @@ addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
 
 val zioVersion        = "1.0.0-RC18-2"
 val rsVersion         = "1.0.3"
-val collCompatVersion = "2.1.5"
+val collCompatVersion = "2.1.6"
 
 lazy val interopReactiveStreams = project
   .in(file("."))
