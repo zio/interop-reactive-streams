@@ -82,22 +82,30 @@ object Adapters {
             .ensuring(q.size.flatMap(n => if (n <= 0) q.shutdown else UIO.unit))
             .toManaged_
             .fork
-      demand <- Ref.make(0L).toManaged_
+      demand <- RefM.make(0L).toManaged_
     } yield {
 
       val capacity: Long = q.capacity.toLong
 
-      val requestAndTake =
-        demand.modify(d => (sub.request(capacity - d), capacity - 1)) *> q.take.flatMap(a => Pull.emit(a))
-      val take = demand.update(_ - 1) *> q.take.flatMap(a => Pull.emit(a))
-
-      q.size.flatMap {
-        case n if n <= 0 =>
-          completion.isDone.flatMap {
-            case true  => completion.await.foldM(e => Pull.fail(e), _ => Pull.end)
-            case false => demand.get.flatMap(d => if (d < capacity) requestAndTake else take)
-          }
-        case _ => take
+      ZIO.uninterruptibleMask { restore =>
+        q.size.flatMap {
+          case n if n <= 0 =>
+            completion.isDone.flatMap { done =>
+              restore(
+                if (done)
+                  completion.await.foldM(e => Pull.fail(e), _ => Pull.end)
+                else
+                  demand.update { d =>
+                    val requestAdditional = capacity - d
+                    UIO(sub.request(requestAdditional)).when(requestAdditional > 0).as(capacity - 1)
+                  } *> q.take.flatMap(a => Pull.emit(a))
+              )
+            }
+          case _ =>
+            restore(
+              demand.update(d => UIO.succeedNow(d - 1)) *> q.take.flatMap(a => Pull.emit(a))
+            )
+        }
       }.foldCauseM(
         cause =>
           if (cause.interruptedOnly) {
