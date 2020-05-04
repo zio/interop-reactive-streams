@@ -2,7 +2,8 @@ package zio.interop.reactivestreams
 
 import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import zio._
-import zio.stream.{ ZSink, ZStream }
+import zio.stream.{ Take, ZSink, ZStream }
+import zio.stream.Take.{ End, Fail, Value }
 import zio.stream.ZStream.Pull
 
 object Adapters {
@@ -38,126 +39,99 @@ object Adapters {
     } yield (error, demandUnfoldSink(subscriber, demand))
 
   def publisherToStream[A](publisher: Publisher[A], bufferSize: Int): ZStream[Any, Throwable, A] = {
-    val pullOrFail = for {
-      (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize).toManaged_
-      _                                         <- UIO(publisher.subscribe(subscriber)).toManaged_
-      sub <- ZManaged
-              .fromEffect(subscription.await)
-              .onExitFirst(_.foreach(sub => UIO(sub.cancel()).whenM(completion.isDone.map(!_))))
-      process <- process(q, sub, completion)
-    } yield process
+    val pullOrFail =
+      for {
+        (subscriber, p) <- makeSubscriber[A](bufferSize)
+        _               <- UIO(publisher.subscribe(subscriber)).toManaged_
+        (sub, q)        <- p.await.toManaged_
+        process         <- process(q, sub)
+      } yield process
     val pull = pullOrFail.catchAll(e => UIO(Pull.fail(e)).toManaged_)
-    ZStream.apply(pull)
+    ZStream(pull)
   }
 
   def sinkToSubscriber[R, R1 <: R, A1, A, B](
     sink: ZSink[R, Throwable, A1, A, B],
     bufferSize: Int
-  ): ZIO[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
+  ): ZManaged[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
     for {
-      (q, subscription, completion, subscriber) <- makeSubscriber[A](bufferSize)
-      pull = subscription.await.toManaged_
-        .onExitFirst(_.foreach(sub => UIO(sub.cancel()).whenM(completion.isDone.map(!_))))
-        .flatMap(process(q, _, completion))
+      (subscriber, p) <- makeSubscriber[A](bufferSize)
+      pull = p.await.toManaged_.flatMap { case (subscription, q) => process(q, subscription) }
         .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
-      fiber <- ZStream(pull).run(sink).fork
+      fiber <- ZStream(pull).run(sink).toManaged_.fork
     } yield (subscriber, fiber.join)
 
-  /*
-   * Unfold q. When `onComplete` or `onError` is signalled, take the remaining values from `q`, then shut down.
-   * `onComplete` or `onError` always are the last signal if they occur. We optimistically take from `q` and rely on
-   * interruption in case that they are signalled while we wait. `forkQShutdownHook` ensures that `take` is
-   * interrupted in case `q` is empty while `onComplete` or `onError` is signalled.
-   * When we see `completion.done`, the `Publisher` has signalled `onComplete` or `onError` and we are
-   * done. Otherwise the stream has completed before and we need to cancel the subscription.
-   */
   private def process[R, A](
-    q: Queue[A],
-    sub: Subscription,
-    completion: Promise[Throwable, Unit]
-  ): ZManaged[R, Nothing, Pull[Any, Throwable, A]] =
+    q: Queue[Take[Throwable, A]],
+    sub: Subscription
+  ): ZManaged[R, Nothing, Pull[Any, Throwable, A]] = {
+    val capacity = q.capacity.toLong - 1 // leave space for End or Fail
     for {
-      _ <- ZManaged.finalizer(q.shutdown)
-      _ <- completion.await.run
-            .ensuring(q.size.flatMap(n => if (n <= 0) q.shutdown else UIO.unit))
-            .toManaged_
-            .fork
-      demand <- Ref.make(0L).toManaged_
-    } yield {
-
-      val capacity: Long = q.capacity.toLong
-
-      val requestAndTake =
-        demand.modify(d => (sub.request(capacity - d), capacity - 1)) *> q.take.flatMap(a => Pull.emit(a))
-      val take = demand.update(_ - 1) *> q.take.flatMap(a => Pull.emit(a))
-
-      q.size.flatMap {
-        case n if n <= 0 =>
-          completion.isDone.flatMap {
-            case true  => completion.await.foldM(e => Pull.fail(e), _ => Pull.end)
-            case false => demand.get.flatMap(d => if (d < capacity) requestAndTake else take)
-          }
-        case _ => take
-      }.foldCauseM(
-        cause =>
-          if (cause.interruptedOnly) {
-            completion.poll.flatMap {
-              case None     => Pull.end
-              case Some(io) => io.foldM(e => Pull.fail(e), _ => Pull.end)
-            }
-          } else {
-            ZIO.halt(cause)
-          },
-        UIO.succeed(_)
-      )
+      _         <- UIO(sub.request(capacity)).toManaged_
+      requested <- RefM.make(capacity).toManaged_
+    } yield q.take.flatMap {
+      case End         => Pull.end
+      case Fail(value) => Pull.halt(value)
+      case Value(value) =>
+        requested.getAndUpdate {
+          case 1 => UIO(sub.request(capacity)).as(capacity)
+          case n => UIO.succeedNow(n - 1)
+        } *> Pull.emitNow(value)
     }
+  }
 
   private def makeSubscriber[A](
     capacity: Int
-  ): UIO[(Queue[A], Promise[Throwable, Subscription], Promise[Throwable, Unit], Subscriber[A])] =
+  ): UManaged[(Subscriber[A], Promise[Throwable, (Subscription, Queue[Take[Throwable, A]])])] =
     for {
-      runtime      <- ZIO.runtime[Any]
-      q            <- Queue.bounded[A](capacity)
-      subscription <- Promise.make[Throwable, Subscription]
-      completion   <- Promise.make[Throwable, Unit]
+      q <- Queue
+            .bounded[Take[Throwable, A]](capacity)
+            .toManaged(_.shutdown)
+      p <- Promise
+            .make[Throwable, (Subscription, Queue[Take[Throwable, A]])]
+            .toManaged(p => ZIO.whenM(p.isDone)(p.await.fold(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel) })))
+      runtime <- ZIO.runtime[Any].toManaged_
     } yield {
-      val subscriber = new Subscriber[A] {
 
-        override def onSubscribe(s: Subscription): Unit =
-          if (s == null) {
-            val e = new NullPointerException("s was null in onSubscribe")
-            runtime.unsafeRun(subscription.fail(e))
-            throw e
-          } else {
-            runtime.unsafeRun(subscription.succeed(s).flatMap {
-              // `whenM(q.isShutdown)`, the Stream has been interrupted or completed before we received `onSubscribe`
-              case true  => UIO(s.cancel()).whenM(q.isShutdown)
-              case false => UIO(s.cancel())
-            })
-          }
+      val subscriber =
+        new Subscriber[A] {
 
-        override def onNext(t: A): Unit =
-          if (t == null) {
-            val e = new NullPointerException("t was null in onNext")
-            runtime.unsafeRun(completion.fail(e))
-            throw e
-          } else {
-            runtime.unsafeRunSync(q.offer(t))
-            ()
-          }
+          override def onSubscribe(s: Subscription): Unit =
+            if (s == null) {
+              val e = new NullPointerException("s was null in onSubscribe")
+              runtime.unsafeRun(p.fail(e))
+              throw e
+            } else {
+              runtime.unsafeRun(p.succeed((s, q)).flatMap {
+                // `whenM(q.isShutdown)`, the Stream has been interrupted or completed before we received `onSubscribe`
+                case true  => UIO(s.cancel()).whenM(q.isShutdown)
+                case false => UIO(s.cancel())
+              })
+            }
 
-        override def onError(e: Throwable): Unit =
-          if (e == null) {
-            val e = new NullPointerException("t was null in onError")
-            runtime.unsafeRun(completion.fail(e))
-            throw e
-          } else {
-            runtime.unsafeRun(completion.fail(e).unit)
-          }
+          override def onNext(t: A): Unit =
+            if (t == null) {
+              val e = new NullPointerException("t was null in onNext")
+              runtime.unsafeRun(q.offer(Take.Fail(Cause.fail(e))))
+              throw e
+            } else {
+              runtime.unsafeRunSync(q.offer(Take.Value(t)))
+              ()
+            }
 
-        override def onComplete(): Unit = runtime.unsafeRun(completion.succeed(()).unit)
-      }
-      (q, subscription, completion, subscriber)
+          override def onError(e: Throwable): Unit =
+            if (e == null) {
+              val e = new NullPointerException("t was null in onError")
+              runtime.unsafeRun(q.offer(Take.Fail(Cause.fail(e))))
+              throw e
+            } else {
+              runtime.unsafeRun(q.offer(Take.Fail(Cause.fail(e))).unit)
+            }
+
+          override def onComplete(): Unit =
+            runtime.unsafeRun(q.offer(Take.End).unit)
+        }
+      (subscriber, p)
     }
 
   def demandUnfoldSink[A](

@@ -2,7 +2,7 @@ package zio.interop
 
 import org.reactivestreams.{ Publisher, Subscriber }
 import zio.stream.{ ZSink, ZStream }
-import zio.{ IO, Promise, UIO, ZIO }
+import zio.{ IO, Promise, UIO, ZIO, ZManaged }
 
 package object reactivestreams {
 
@@ -23,18 +23,19 @@ package object reactivestreams {
      * Create a `Subscriber` from a `Sink`. The returned IO will eventually return the result of running the subscribed
      * stream to the sink. Consumption is started as soon as the resource is used, even if the IO is never run. Interruption
      * propagates from the `Zmanaged` to the stream, but not from the IO.
-     * @param qSize The size used as internal buffer. If possible, set to a power of 2 value for best performance.
+     * @param qSize The size used as internal buffer. A maximum of `qSize-1` `A`s will be buffered, so `qSize` must be > 1.
+     *              If possible, set to a power of 2 value for best performance.
      *
      */
-    def toSubscriber[R1 <: R](qSize: Int = 16): ZIO[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
+    def toSubscriber[R1 <: R](qSize: Int = 16): ZManaged[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
       Adapters.sinkToSubscriber(sink, qSize)
   }
 
   final implicit class publisherToStream[A](private val publisher: Publisher[A]) extends AnyVal {
 
     /**
-     * Create a `Stream` from a `Publisher`.
-     * @param qSize The size used as internal buffer. If possible, set to a power of 2 value for best performance.
+     * @param qSize The size used as internal buffer. A maximum of `qSize-1` `A`s will be buffered, so `qSize` must be > 1.
+     *              If possible, set to a power of 2 value for best performance.
      */
     def toStream(qSize: Int = 16): ZStream[Any, Throwable, A] =
       Adapters.publisherToStream(publisher, qSize)

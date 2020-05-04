@@ -4,13 +4,14 @@ import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import org.reactivestreams.tck.{ SubscriberWhiteboxVerification, TestEnvironment }
 import org.reactivestreams.tck.SubscriberWhiteboxVerification.{ SubscriberPuppet, WhiteboxSubscriberProbe }
 import org.testng.annotations.Test
-import zio.clock.Clock
+import zio.{ Promise, Task, UIO, ZIO, ZManaged }
 import zio.blocking._
+import zio.clock.Clock
 import zio.duration._
 import zio.stream.Sink
 import zio.test._
 import zio.test.Assertion._
-import zio.{ Promise, Task, UIO, ZIO, ZManaged }
+import zio.test.environment.Live
 
 object SinkToSubscriberSpec extends DefaultRunnableSpec {
   override def spec =
@@ -21,13 +22,19 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
           fiber <- Sink
                     .collectAllN[Int](5)
                     .toSubscriber()
-                    .flatMap {
+                    .use {
                       case (subscriber, r) => UIO(publisher.subscribe(subscriber)) *> r
                     }
                     .fork
-          _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
-          _ <- assertM(requested.await.timeoutFail("timeout awaiting request.")(500.millis).run)(succeeds(isUnit))
-          _ <- assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run)(succeeds(isUnit))
+          _ <- Live.live(
+                assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
+              )
+          _ <- Live.live(
+                assertM(requested.await.timeoutFail("timeout awaiting request.")(500.millis).run)(succeeds(isUnit))
+              )
+          _ <- Live.live(
+                assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run)(succeeds(isUnit))
+              )
           r <- fiber.join.run
         } yield assert(r)(succeeds(equalTo(List(1, 2, 3, 4, 5))))
       ),
@@ -36,11 +43,15 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
           (publisher, subscribed, _, canceled) <- makePublisherProbe
           fiber <- Sink.drain
                     .toSubscriber()
-                    .flatMap { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
+                    .use { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
                     .fork
-          _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
+          _ <- Live.live(
+                assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
+              )
           _ <- fiber.interrupt
-          _ <- assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run)(succeeds(isUnit))
+          _ <- Live.live(
+                assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run)(succeeds(isUnit))
+              )
           r <- fiber.join.run
         } yield assert(r)(isInterrupted)
       ),
@@ -49,12 +60,18 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
           (publisher, subscribed, requested, canceled) <- makePublisherProbe
           fiber <- Sink.drain
                     .toSubscriber()
-                    .flatMap { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
+                    .use { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
                     .fork
-          _ <- assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
-          _ <- assertM(requested.await.timeoutFail("timeout awaiting request.")(500.millis).run)(succeeds(isUnit))
+          _ <- Live.live(
+                assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).run)(succeeds(isUnit))
+              )
+          _ <- Live.live(
+                assertM(requested.await.timeoutFail("timeout awaiting request.")(500.millis).run)(succeeds(isUnit))
+              )
           _ <- fiber.interrupt
-          _ <- assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run)(succeeds(isUnit))
+          _ <- Live.live(
+                assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).run)(succeeds(isUnit))
+              )
           r <- fiber.join.run
         } yield assert(r)(isInterrupted)
       ),
@@ -113,7 +130,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
 
   val managedVerification =
     for {
-      (subscriber, _) <- Sink.collectAll[Int].toSubscriber[Clock]().toManaged_
+      (subscriber, _) <- Sink.collectAll[Int].toSubscriber[Clock]()
       sbv <- ZManaged.make {
               val env = new TestEnvironment(1000, 500)
               val sbv =
