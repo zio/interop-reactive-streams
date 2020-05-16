@@ -31,7 +31,7 @@ object BuildHelper {
   val buildInfoSettings = Seq(
     buildInfoKeys := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, isSnapshot),
     buildInfoPackage := "zio",
-    buildInfoObject := "BuildInfo"
+    buildInfoObject := "BuildInfoInteropReactiveStreams"
   )
 
   def extraOptions(scalaVersion: String) =

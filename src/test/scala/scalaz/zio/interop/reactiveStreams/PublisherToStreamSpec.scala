@@ -102,22 +102,22 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
 
   def publish(seq: List[Int], failure: Option[Throwable]): UIO[Exit[Throwable, List[Int]]] = {
 
-    def loop(probe: ManualPublisher[Int], remaining: List[Int], pending: Int): Task[Unit] =
+    def loop(probe: ManualPublisher[Int], remaining: List[Int]): Task[Unit] =
       for {
         n             <- Task(probe.expectRequest())
-        _             <- Task(assert(n.toInt + pending)(isLessThanEqualTo(bufferSize)))
-        half          = n.toInt / 2 + 1
-        (nextN, tail) = remaining.splitAt(half)
+        _             <- Task(assert(n.toInt)(isLessThanEqualTo(bufferSize)))
+        split         = n.toInt
+        (nextN, tail) = remaining.splitAt(split)
         _             <- Task(nextN.foreach(probe.sendNext))
-        _ <- if (nextN.size < half) Task(failure.fold(probe.sendCompletion())(probe.sendError))
-            else loop(probe, tail, n.toInt - half)
+        _ <- if (nextN.size < split) Task(failure.fold(probe.sendCompletion())(probe.sendError))
+            else loop(probe, tail)
       } yield ()
 
     val faillable =
       for {
         probe <- makeProbe
         fiber <- probe.toStream(bufferSize).run(Sink.collectAll[Int]).fork
-        _     <- loop(probe, seq, 0)
+        _     <- loop(probe, seq)
         r     <- fiber.join
       } yield r
 
