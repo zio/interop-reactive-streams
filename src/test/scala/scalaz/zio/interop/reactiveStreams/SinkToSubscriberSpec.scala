@@ -4,11 +4,11 @@ import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import org.reactivestreams.tck.{ SubscriberWhiteboxVerification, TestEnvironment }
 import org.reactivestreams.tck.SubscriberWhiteboxVerification.{ SubscriberPuppet, WhiteboxSubscriberProbe }
 import org.testng.annotations.Test
-import zio.{ Promise, Task, UIO, ZIO, ZManaged }
+import zio.{ Chunk, Promise, Task, UIO, ZIO, ZManaged }
 import zio.blocking._
 import zio.clock.Clock
 import zio.duration._
-import zio.stream.Sink
+import zio.stream.{ Sink, ZSink }
 import zio.test._
 import zio.test.Assertion._
 import zio.test.environment.Live
@@ -19,8 +19,9 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
       testM("works on the happy path")(
         for {
           (publisher, subscribed, requested, canceled) <- makePublisherProbe
-          fiber <- Sink
-                    .collectAllN[Int](5)
+          fiber <- ZSink
+                    .fold[Int, Chunk[Int]](Chunk.empty)(_.size < 5)(_ + _)
+                    .map(_.toList)
                     .toSubscriber()
                     .use {
                       case (subscriber, r) => UIO(publisher.subscribe(subscriber)) *> r
