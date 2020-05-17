@@ -68,16 +68,55 @@ object Adapters {
     for {
       _         <- UIO(sub.request(capacity)).toManaged_
       requested <- RefM.make(capacity).toManaged_
-    } yield q.take.flatMap {
-      case Exit.Success(value) =>
-        requested.getAndUpdate {
-          case 1 => UIO(sub.request(capacity)).as(capacity)
-          case n => UIO.succeedNow(n - 1)
-        } *> Pull.emit(value)
-      case Exit.Failure(cause) =>
-        Cause.sequenceCauseOption(cause) match {
-          case Some(cause) => Pull.halt(cause)
-          case None        => Pull.end
+      lastP     <- Promise.make[Option[Throwable], Chunk[A]].toManaged_
+    } yield lastP.isDone.flatMap {
+      case true => lastP.await
+      case false =>
+        q.takeBetween(1, q.capacity).flatMap { all =>
+          val (values, rest) =
+            all.span {
+              case Exit.Success(_) => true
+              case _               => false
+            }
+          if (values.isEmpty) {
+            rest.headOption match { // avoid emitting an empty Chunk
+              case Some(Exit.Failure(cause)) =>
+                Cause.sequenceCauseOption(cause) match {
+                  case Some(cause) => Pull.halt(cause)
+                  case None        => Pull.end
+                }
+              case _ =>
+                IO.die(new IllegalStateException("Impossible state in process."))
+            }
+          } else {
+            val completeOrRequest =
+              rest.headOption match {
+                case Some(Exit.Failure(cause)) =>
+                  val last =
+                    Cause.sequenceCauseOption(cause) match {
+                      case Some(cause) => Pull.halt(cause)
+                      case None        => Pull.end
+                    }
+                  lastP.complete(last)
+                case _ =>
+                  val request = values.length
+                  requested.getAndUpdate {
+                    case `request` => UIO(sub.request(capacity)).as(capacity)
+                    case n         => UIO.succeedNow(n - request)
+                  }
+              }
+            val emit =
+              Pull.emit(
+                Chunk
+                  .fromIterable(
+                    values.collect {
+                      case Exit.Success(v) => v
+                    }
+                  )
+                  .flatten
+              )
+            completeOrRequest *> emit
+          }
         }
     }
   }
