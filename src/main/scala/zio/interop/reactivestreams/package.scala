@@ -16,8 +16,7 @@ package object reactivestreams {
       Adapters.streamToPublisher(stream)
   }
 
-  final implicit class sinkToSubscriber[R, E <: Throwable, A0, A, B](private val sink: ZSink[R, E, A0, A, B])
-      extends AnyVal {
+  final implicit class sinkToSubscriber[R, E <: Throwable, A, B](private val sink: ZSink[R, E, A, B]) extends AnyVal {
 
     /**
      * Create a `Subscriber` from a `Sink`. The returned IO will eventually return the result of running the subscribed
@@ -56,7 +55,7 @@ package object reactivestreams {
      * } yield ()
      * ```
      */
-    def toSink[E <: Throwable]: UIO[(Promise[E, Nothing], ZSink[Any, E, Unit, A, Unit])] =
+    def toSink[E <: Throwable]: UIO[(Promise[E, Nothing], ZSink[Any, E, A, Unit])] =
       Adapters.subscriberToSink(subscriber)
   }
 

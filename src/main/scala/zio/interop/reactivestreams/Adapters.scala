@@ -2,9 +2,8 @@ package zio.interop.reactivestreams
 
 import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import zio._
-import zio.stream.{ Take, ZSink, ZStream }
-import zio.stream.Take.{ End, Fail, Value }
-import zio.stream.ZStream.Pull
+import zio.stream.{ ZSink, ZStream }
+import zio.stream.ZStream.{ Pull, Take }
 
 object Adapters {
 
@@ -28,7 +27,7 @@ object Adapters {
 
   def subscriberToSink[E <: Throwable, A](
     subscriber: Subscriber[A]
-  ): UIO[(Promise[E, Nothing], ZSink[Any, Nothing, Unit, A, Unit])] =
+  ): UIO[(Promise[E, Nothing], ZSink[Any, Nothing, A, Unit])] =
     for {
       runtime      <- ZIO.runtime[Any]
       demand       <- Queue.unbounded[Long]
@@ -50,8 +49,8 @@ object Adapters {
     ZStream(pull)
   }
 
-  def sinkToSubscriber[R, R1 <: R, A1, A, B](
-    sink: ZSink[R, Throwable, A1, A, B],
+  def sinkToSubscriber[R, R1 <: R, A, B](
+    sink: ZSink[R, Throwable, A, B],
     bufferSize: Int
   ): ZManaged[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
     for {
@@ -64,19 +63,22 @@ object Adapters {
   private def process[R, A](
     q: Queue[Take[Throwable, A]],
     sub: Subscription
-  ): ZManaged[R, Nothing, Pull[Any, Throwable, A]] = {
+  ): ZManaged[Any, Nothing, ZIO[Any, Option[Throwable], Chunk[A]]] = {
     val capacity = q.capacity.toLong - 1 // leave space for End or Fail
     for {
       _         <- UIO(sub.request(capacity)).toManaged_
       requested <- RefM.make(capacity).toManaged_
     } yield q.take.flatMap {
-      case End         => Pull.end
-      case Fail(value) => Pull.halt(value)
-      case Value(value) =>
+      case Exit.Success(value) =>
         requested.getAndUpdate {
           case 1 => UIO(sub.request(capacity)).as(capacity)
           case n => UIO.succeedNow(n - 1)
-        } *> Pull.emitNow(value)
+        } *> Pull.emit(value)
+      case Exit.Failure(cause) =>
+        Cause.sequenceCauseOption(cause) match {
+          case Some(cause) => Pull.halt(cause)
+          case None        => Pull.end
+        }
     }
   }
 
@@ -89,7 +91,7 @@ object Adapters {
             .toManaged(_.shutdown)
       p <- Promise
             .make[Throwable, (Subscription, Queue[Take[Throwable, A]])]
-            .toManaged(p => ZIO.whenM(p.isDone)(p.await.fold(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel) })))
+            .toManaged(p => ZIO.whenM(p.isDone)(p.await.fold(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel()) })))
       runtime <- ZIO.runtime[Any].toManaged_
     } yield {
 
@@ -112,20 +114,20 @@ object Adapters {
           override def onNext(t: A): Unit =
             if (t == null) {
               val e = new NullPointerException("t was null in onNext")
-              runtime.unsafeRun(q.offer(Take.Fail(Cause.fail(e))))
+              runtime.unsafeRun(q.offer(Exit.fail(Some(e))))
               throw e
             } else {
-              runtime.unsafeRunSync(q.offer(Take.Value(t)))
+              runtime.unsafeRunSync(q.offer(Exit.succeed(Chunk.single(t))))
               ()
             }
 
           override def onError(e: Throwable): Unit =
             if (e == null) {
               val e = new NullPointerException("t was null in onError")
-              runtime.unsafeRun(q.offer(Take.Fail(Cause.fail(e))))
+              runtime.unsafeRun(q.offer(Exit.fail(Some(e))))
               throw e
             } else {
-              runtime.unsafeRun(q.offer(Take.Fail(Cause.fail(e))).unit)
+              runtime.unsafeRun(q.offer(Exit.fail(Some(e))).unit)
             }
 
           override def onComplete(): Unit =
@@ -137,26 +139,17 @@ object Adapters {
   def demandUnfoldSink[A](
     subscriber: Subscriber[_ >: A],
     demand: Queue[Long]
-  ): ZSink[Any, Nothing, Nothing, A, Unit] =
-    new ZSink[Any, Nothing, Nothing, A, Unit] {
-
-      override type State = (Long, Boolean)
-
-      def cont(state: State): Boolean = state._2
-
-      override def extract(state: State): UIO[(Unit, Chunk[Nothing])] =
-        demand.isShutdown.flatMap(is => UIO(subscriber.onComplete()).when(!is)) *> UIO.succeed(((), Chunk.empty))
-
-      override def initial: UIO[State] = UIO((0L, true))
-
-      override def step(state: State, a: A): UIO[State] =
-        demand.isShutdown.flatMap {
-          case true                  => UIO((state._1, false))
-          case false if state._1 > 0 => UIO(subscriber.onNext(a)).map(_ => (state._1 - 1, true))
-          case false                 => demand.take.flatMap(n => UIO(subscriber.onNext(a)).map(_ => (n - 1, true)))
-        }
-
-    }
+  ): ZSink[Any, Nothing, A, Unit] =
+    ZSink
+      .foldM[Any, Nothing, A, (Long, Boolean)]((0L, true))(_._2) {
+        case (state, a) =>
+          demand.isShutdown.flatMap {
+            case true                  => UIO((state._1, false))
+            case false if state._1 > 0 => UIO(subscriber.onNext(a)).as((state._1 - 1, true))
+            case false                 => demand.take.flatMap(n => UIO(subscriber.onNext(a)).as((n - 1, true)))
+          }
+      }
+      .mapM(_ => demand.isShutdown.flatMap(is => UIO(subscriber.onComplete()).when(!is)))
 
   def createSubscription[A](
     subscriber: Subscriber[_ >: A],
