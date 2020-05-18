@@ -1,6 +1,7 @@
 package zio.interop.reactivestreams
 
 import org.reactivestreams.{ Publisher, Subscriber, Subscription }
+import scala.annotation.tailrec
 import zio._
 import zio.stream.{ ZSink, ZStream }
 import zio.stream.ZStream.{ Pull, Take }
@@ -72,52 +73,30 @@ object Adapters {
     } yield lastP.isDone.flatMap {
       case true => lastP.await
       case false =>
-        q.takeBetween(1, q.capacity).flatMap { all =>
-          val (values, rest) =
-            all.span {
-              case Exit.Success(_) => true
-              case _               => false
-            }
-          if (values.isEmpty) {
-            rest.headOption match { // avoid emitting an empty Chunk
-              case Some(Exit.Failure(cause)) =>
+        @tailrec
+        def takesToPull(
+          takes: List[Take[Throwable, A]],
+          chunk: Chunk[A]
+        ): IO[Option[Throwable], Chunk[A]] =
+          takes match {
+            case Nil =>
+              val request = chunk.size
+              requested.getAndUpdate {
+                case `request` => UIO(sub.request(capacity)).as(capacity)
+                case n         => UIO.succeedNow(n - request)
+              } *> Pull.emit(chunk)
+            case Exit.Success(v) :: tail =>
+              takesToPull(tail, chunk ++ v)
+            case Exit.Failure(cause) :: _ =>
+              val pull =
                 Cause.sequenceCauseOption(cause) match {
                   case Some(cause) => Pull.halt(cause)
                   case None        => Pull.end
                 }
-              case _ =>
-                IO.die(new IllegalStateException("Impossible state in process."))
-            }
-          } else {
-            val completeOrRequest =
-              rest.headOption match {
-                case Some(Exit.Failure(cause)) =>
-                  val last =
-                    Cause.sequenceCauseOption(cause) match {
-                      case Some(cause) => Pull.halt(cause)
-                      case None        => Pull.end
-                    }
-                  lastP.complete(last)
-                case _ =>
-                  val request = values.length
-                  requested.getAndUpdate {
-                    case `request` => UIO(sub.request(capacity)).as(capacity)
-                    case n         => UIO.succeedNow(n - request)
-                  }
-              }
-            val emit =
-              Pull.emit(
-                Chunk
-                  .fromIterable(
-                    values.collect {
-                      case Exit.Success(v) => v
-                    }
-                  )
-                  .flatten
-              )
-            completeOrRequest *> emit
+              if (chunk.isEmpty) pull else lastP.complete(pull) *> Pull.emit(chunk)
           }
-        }
+
+        q.takeBetween(1, q.capacity).flatMap(takesToPull(_, Chunk.empty))
     }
   }
 
