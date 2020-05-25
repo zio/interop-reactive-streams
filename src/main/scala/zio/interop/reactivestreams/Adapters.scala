@@ -1,9 +1,9 @@
 package zio.interop.reactivestreams
 
-import org.reactivestreams.{ Publisher, Subscriber, Subscription }
+import org.reactivestreams.{Publisher, Subscriber, Subscription}
 import zio._
-import zio.stream.{ ZSink, ZStream }
-import zio.stream.ZStream.{ Pull, Take }
+import zio.stream.ZStream.Pull
+import zio.stream.{Take, ZSink, ZStream}
 
 object Adapters {
 
@@ -68,7 +68,7 @@ object Adapters {
     for {
       _         <- UIO(sub.request(capacity)).toManaged_
       requested <- RefM.make(capacity).toManaged_
-    } yield q.take.flatMap {
+    } yield q.take.map(_.exit).flatMap {
       case Exit.Success(value) =>
         requested.getAndUpdate {
           case 1 => UIO(sub.request(capacity)).as(capacity)
@@ -114,24 +114,24 @@ object Adapters {
           override def onNext(t: A): Unit =
             if (t == null) {
               val e = new NullPointerException("t was null in onNext")
-              runtime.unsafeRun(q.offer(Exit.fail(Some(e))))
+              runtime.unsafeRun(q.offer(Take.fail(e)))
               throw e
             } else {
-              runtime.unsafeRunSync(q.offer(Exit.succeed(Chunk.single(t))))
+              runtime.unsafeRunSync(q.offer(Take.chunk(Chunk.single(t))))
               ()
             }
 
           override def onError(e: Throwable): Unit =
             if (e == null) {
               val e = new NullPointerException("t was null in onError")
-              runtime.unsafeRun(q.offer(Exit.fail(Some(e))))
+              runtime.unsafeRun(q.offer(Take.fail(e)))
               throw e
             } else {
-              runtime.unsafeRun(q.offer(Exit.fail(Some(e))).unit)
+              runtime.unsafeRun(q.offer(Take.fail(e)).unit)
             }
 
           override def onComplete(): Unit =
-            runtime.unsafeRun(q.offer(Take.End).unit)
+            runtime.unsafeRun(q.offer(Take.end).unit)
         }
       (subscriber, p)
     }
