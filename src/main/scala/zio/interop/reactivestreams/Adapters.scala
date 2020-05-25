@@ -86,7 +86,7 @@ object Adapters {
                 case n         => UIO.succeedNow(n - request)
               } *> Pull.emit(chunk)
             case Exit.Success(v) :: tail =>
-              takesToPull(tail, chunk.appended(v))
+              takesToPull(tail, chunk :+ v)
             case Exit.Failure(cause) :: _ =>
               val pull =
                 Cause.sequenceCauseOption(cause) match {
