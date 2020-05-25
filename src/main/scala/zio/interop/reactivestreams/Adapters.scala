@@ -4,7 +4,7 @@ import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import scala.annotation.tailrec
 import zio._
 import zio.stream.{ ZSink, ZStream }
-import zio.stream.ZStream.{ Pull, Take }
+import zio.stream.ZStream.Pull
 
 object Adapters {
 
@@ -62,7 +62,7 @@ object Adapters {
     } yield (subscriber, fiber.join)
 
   private def process[R, A](
-    q: Queue[Take[Throwable, A]],
+    q: Queue[Exit[Option[Throwable], A]],
     sub: Subscription
   ): ZManaged[Any, Nothing, ZIO[Any, Option[Throwable], Chunk[A]]] = {
     val capacity = q.capacity.toLong - 1 // leave space for End or Fail
@@ -75,7 +75,7 @@ object Adapters {
       case false =>
         @tailrec
         def takesToPull(
-          takes: List[Take[Throwable, A]],
+          takes: List[Exit[Option[Throwable], A]],
           chunk: Chunk[A]
         ): IO[Option[Throwable], Chunk[A]] =
           takes match {
@@ -86,7 +86,7 @@ object Adapters {
                 case n         => UIO.succeedNow(n - request)
               } *> Pull.emit(chunk)
             case Exit.Success(v) :: tail =>
-              takesToPull(tail, chunk ++ v)
+              takesToPull(tail, chunk.appended(v))
             case Exit.Failure(cause) :: _ =>
               val pull =
                 Cause.sequenceCauseOption(cause) match {
@@ -102,13 +102,13 @@ object Adapters {
 
   private def makeSubscriber[A](
     capacity: Int
-  ): UManaged[(Subscriber[A], Promise[Throwable, (Subscription, Queue[Take[Throwable, A]])])] =
+  ): UManaged[(Subscriber[A], Promise[Throwable, (Subscription, Queue[Exit[Option[Throwable], A]])])] =
     for {
       q <- Queue
-            .bounded[Take[Throwable, A]](capacity)
+            .bounded[Exit[Option[Throwable], A]](capacity)
             .toManaged(_.shutdown)
       p <- Promise
-            .make[Throwable, (Subscription, Queue[Take[Throwable, A]])]
+            .make[Throwable, (Subscription, Queue[Exit[Option[Throwable], A]])]
             .toManaged(p => ZIO.whenM(p.isDone)(p.await.fold(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel()) })))
       runtime <- ZIO.runtime[Any].toManaged_
     } yield {
@@ -135,7 +135,7 @@ object Adapters {
               runtime.unsafeRun(q.offer(Exit.fail(Some(e))))
               throw e
             } else {
-              runtime.unsafeRunSync(q.offer(Exit.succeed(Chunk.single(t))))
+              runtime.unsafeRunSync(q.offer(Exit.succeed(t)))
               ()
             }
 
@@ -149,7 +149,7 @@ object Adapters {
             }
 
           override def onComplete(): Unit =
-            runtime.unsafeRun(q.offer(Take.End).unit)
+            runtime.unsafeRun(q.offer(Exit.fail(None)).unit)
         }
       (subscriber, p)
     }
