@@ -1,17 +1,13 @@
 package zio.interop.reactivestreams
 
-import org.reactivestreams.Publisher
-import org.reactivestreams.Subscriber
-import org.reactivestreams.Subscription
+import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualPublisher
-import zio.{ Exit, Task, UIO, ZIO }
+import zio.{ Exit, Promise, Task, UIO, ZIO }
 import zio.duration._
-import zio.stream.Sink
-import zio.stream.Stream
+import zio.stream.{ Sink, Stream }
 import zio.test._
 import zio.test.Assertion._
-import zio.Promise
 
 object PublisherToStreamSpec extends DefaultRunnableSpec {
 
