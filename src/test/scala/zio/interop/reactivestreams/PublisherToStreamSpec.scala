@@ -98,6 +98,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           demand <- Task(probe.expectRequest())
           _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
           _      <- Task(probe.expectCancelling())
+          _      <- fiber.join
         } yield ()).run)(
           succeeds(isUnit)
         )
@@ -109,8 +110,9 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           demand <- Task(probe.expectRequest())
           _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
           _      <- Task(probe.expectCancelling())
+          _      <- fiber.join
         } yield ()).run)(
-          succeeds(isUnit)
+          fails(anything)
         )
       }
     )
