@@ -130,7 +130,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
   def withProbe[R, E0, E >: Throwable, A](f: ManualPublisher[Int] => ZIO[R, E, A]): ZIO[R, E, A] = {
     val testEnv = new TestEnvironment(3000, 500)
     val probe   = new ManualPublisher[Int](testEnv)
-    f(probe) <* Task(testEnv.verifyNoAsyncErrorsNoDelay()).mapError { t => t.setStackTrace(Array.empty); t }
+    f(probe) <* Task(testEnv.verifyNoAsyncErrorsNoDelay())
   }
 
   def publish(seq: List[Int], failure: Option[Throwable]): UIO[Exit[Throwable, List[Int]]] = {
