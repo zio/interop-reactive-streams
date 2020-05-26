@@ -109,7 +109,9 @@ object Adapters {
             .toManaged(_.shutdown)
       p <- Promise
             .make[Throwable, (Subscription, Queue[Exit[Option[Throwable], A]])]
-            .toManaged(p => ZIO.whenM(p.isDone)(p.await.fold(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel()) })))
+            .toManaged(p =>
+              p.poll.flatMap(_.fold(UIO.unit)(_.foldM(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel()) })))
+            )
       runtime <- ZIO.runtime[Any].toManaged_
     } yield {
 

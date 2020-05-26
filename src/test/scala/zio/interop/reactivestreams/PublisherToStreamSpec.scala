@@ -43,76 +43,82 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
         }
       },
       testM("does not freeze on stream end") {
-        for {
-          probe <- makeProbe
-          fiber <- Stream
-                    .fromEffect(
-                      UIO(
-                        probe.toStream()
+        withProbe(probe =>
+          for {
+            fiber <- Stream
+                      .fromEffect(
+                        UIO(
+                          probe.toStream()
+                        )
                       )
-                    )
-                    .flatMap(identity)
-                    .run(Sink.collectAll[Int])
-                    .fork
-          _ <- Task(probe.expectRequest())
-          _ <- UIO(probe.sendNext(1))
-          _ <- UIO(probe.sendCompletion)
-          r <- fiber.join
-        } yield assert(r)(equalTo(List(1)))
+                      .flatMap(identity)
+                      .run(Sink.collectAll[Int])
+                      .fork
+            _ <- Task(probe.expectRequest())
+            _ <- UIO(probe.sendNext(1))
+            _ <- UIO(probe.sendCompletion)
+            r <- fiber.join
+          } yield assert(r)(equalTo(List(1)))
+        )
       } @@ TestAspect.timeout(1000.millis),
       testM("cancels subscription when interrupted before subscription") {
-        for {
-          probe <- makeProbe
-          fiber <- probe.toStream(bufferSize).run(Sink.drain).fork
-          _     <- fiber.interrupt
-          r     <- Task(probe.expectCancelling()).run
-        } yield assert(r)(succeeds(isUnit))
+        withProbe(probe =>
+          for {
+            fiber <- probe.toStream(bufferSize).run(Sink.drain).fork
+            _     <- fiber.interrupt
+            r     <- Task(probe.expectCancelling()).run
+          } yield assert(r)(succeeds(isUnit))
+        )
       },
       testM("cancels subscription when interrupted after subscription") {
-        assertM((for {
-          probe <- makeProbe
-          fiber <- probe.toStream(bufferSize).run(Sink.drain).fork
-          _     <- Task(probe.expectRequest())
-          _     <- fiber.interrupt
-          _     <- Task(probe.expectCancelling())
-        } yield ()).run)(
-          succeeds(isUnit)
+        withProbe(probe =>
+          assertM((for {
+            fiber <- probe.toStream(bufferSize).run(Sink.drain).fork
+            _     <- Task(probe.expectRequest())
+            _     <- fiber.interrupt
+            _     <- Task(probe.expectCancelling())
+          } yield ()).run)(
+            succeeds(isUnit)
+          )
         )
       },
       testM("cancels subscription when interrupted during consumption") {
-        assertM((for {
-          probe  <- makeProbe
-          fiber  <- probe.toStream(bufferSize).run(Sink.drain).fork
-          demand <- Task(probe.expectRequest())
-          _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
-          _      <- fiber.interrupt
-          _      <- Task(probe.expectCancelling())
-        } yield ()).run)(
-          succeeds(isUnit)
+        withProbe(probe =>
+          assertM((for {
+            fiber  <- probe.toStream(bufferSize).run(Sink.drain).fork
+            demand <- Task(probe.expectRequest())
+            _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+            _      <- fiber.interrupt
+            _      <- Task(probe.expectCancelling())
+          } yield ()).run)(
+            succeeds(isUnit)
+          )
         )
       },
       testM("cancels subscription on stream end") {
-        assertM((for {
-          probe  <- makeProbe
-          fiber  <- probe.toStream(bufferSize).take(1).run(Sink.drain).fork
-          demand <- Task(probe.expectRequest())
-          _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
-          _      <- Task(probe.expectCancelling())
-          _      <- fiber.join
-        } yield ()).run)(
-          succeeds(isUnit)
+        withProbe(probe =>
+          assertM((for {
+            fiber  <- probe.toStream(bufferSize).take(1).run(Sink.drain).fork
+            demand <- Task(probe.expectRequest())
+            _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+            _      <- Task(probe.expectCancelling())
+            _      <- fiber.join
+          } yield ()).run)(
+            succeeds(isUnit)
+          )
         )
       },
       testM("cancels subscription on stream error") {
-        assertM((for {
-          probe  <- makeProbe
-          fiber  <- probe.toStream(bufferSize).mapM(_ => Task.fail(new Throwable("boom!"))).run(Sink.drain).fork
-          demand <- Task(probe.expectRequest())
-          _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
-          _      <- Task(probe.expectCancelling())
-          _      <- fiber.join
-        } yield ()).run)(
-          fails(anything)
+        withProbe(probe =>
+          assertM((for {
+            fiber  <- probe.toStream(bufferSize).mapM(_ => Task.fail(new Throwable("boom!"))).run(Sink.drain).fork
+            demand <- Task(probe.expectRequest())
+            _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+            _      <- Task(probe.expectCancelling())
+            _      <- fiber.join
+          } yield ()).run)(
+            fails(anything)
+          )
         )
       }
     )
@@ -121,8 +127,11 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
   val seq: List[Int]  = List.range(0, 100)
   val bufferSize: Int = 10
 
-  val testEnv: TestEnvironment             = new TestEnvironment(1000)
-  val makeProbe: UIO[ManualPublisher[Int]] = UIO(new ManualPublisher[Int](testEnv))
+  def withProbe[R, E0, E >: Throwable, A](f: ManualPublisher[Int] => ZIO[R, E, A]): ZIO[R, E, A] = {
+    val testEnv = new TestEnvironment(1000)
+    val probe   = new ManualPublisher[Int](testEnv)
+    f(probe) <* Task(testEnv.verifyNoAsyncErrorsNoDelay()).mapError { t => t.setStackTrace(Array.empty); t }
+  }
 
   def publish(seq: List[Int], failure: Option[Throwable]): UIO[Exit[Throwable, List[Int]]] = {
 
@@ -138,12 +147,13 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
       } yield ()
 
     val faillable =
-      for {
-        probe <- makeProbe
-        fiber <- probe.toStream(bufferSize).run(Sink.collectAll[Int]).fork
-        _     <- loop(probe, seq)
-        r     <- fiber.join
-      } yield r
+      withProbe(probe =>
+        for {
+          fiber <- probe.toStream(bufferSize).run(Sink.collectAll[Int]).fork
+          _     <- loop(probe, seq)
+          r     <- fiber.join
+        } yield r
+      )
 
     faillable.run
   }
