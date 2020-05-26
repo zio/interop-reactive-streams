@@ -11,6 +11,7 @@ import zio.stream.Sink
 import zio.stream.Stream
 import zio.test._
 import zio.test.Assertion._
+import zio.Promise
 
 object PublisherToStreamSpec extends DefaultRunnableSpec {
 
@@ -62,14 +63,27 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
         )
       } @@ TestAspect.timeout(1000.millis),
       testM("cancels subscription when interrupted before subscription") {
-        withProbe(probe =>
+        val tst =
           for {
-            fiber <- probe.toStream(bufferSize).run(Sink.drain).fork
-            _     <- fiber.interrupt
-            r     <- Task(probe.expectCancelling()).run
-          } yield assert(r)(succeeds(isUnit))
-        )
-      },
+            subscriberP    <- Promise.make[Nothing, Subscriber[_]]
+            cancelledLatch <- Promise.make[Nothing, Unit]
+            runtime        <- ZIO.runtime[Any]
+            subscription = new Subscription {
+              override def request(x$1: Long): Unit = ()
+              override def cancel(): Unit           = runtime.unsafeRun(cancelledLatch.succeed(()).unit)
+            }
+            probe = new Publisher[Int] {
+              override def subscribe(subscriber: Subscriber[_ >: Int]): Unit =
+                runtime.unsafeRun(subscriberP.succeed(subscriber).unit)
+            }
+            fiber      <- probe.toStream(bufferSize).run(Sink.drain).fork
+            subscriber <- subscriberP.await
+            _          <- fiber.interrupt
+            _          <- UIO(subscriber.onSubscribe(subscription))
+            _          <- cancelledLatch.await
+          } yield ()
+        assertM(tst.run)(succeeds(anything))
+      } @@ TestAspect.timeout(3.seconds),
       testM("cancels subscription when interrupted after subscription") {
         withProbe(probe =>
           assertM((for {
