@@ -90,6 +90,28 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
         } yield ()).run)(
           succeeds(isUnit)
         )
+      },
+      testM("cancels subscription on stream end") {
+        assertM((for {
+          probe  <- makeProbe
+          fiber  <- probe.toStream(bufferSize).take(1).run(Sink.drain).fork
+          demand <- Task(probe.expectRequest())
+          _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+          _      <- Task(probe.expectCancelling())
+        } yield ()).run)(
+          succeeds(isUnit)
+        )
+      },
+      testM("cancels subscription on stream error") {
+        assertM((for {
+          probe  <- makeProbe
+          fiber  <- probe.toStream(bufferSize).mapM(_ => Task.fail(new Throwable("boom!"))).run(Sink.drain).fork
+          demand <- Task(probe.expectRequest())
+          _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+          _      <- Task(probe.expectCancelling())
+        } yield ()).run)(
+          succeeds(isUnit)
+        )
       }
     )
 
