@@ -1,9 +1,10 @@
 package zio.interop.reactivestreams
 
 import org.reactivestreams.{ Publisher, Subscriber, Subscription }
+import scala.annotation.tailrec
 import zio._
 import zio.stream.{ ZSink, ZStream }
-import zio.stream.ZStream.{ Pull, Take }
+import zio.stream.ZStream.Pull
 
 object Adapters {
 
@@ -61,36 +62,53 @@ object Adapters {
     } yield (subscriber, fiber.join)
 
   private def process[R, A](
-    q: Queue[Take[Throwable, A]],
+    q: Queue[Exit[Option[Throwable], A]],
     sub: Subscription
   ): ZManaged[Any, Nothing, ZIO[Any, Option[Throwable], Chunk[A]]] = {
     val capacity = q.capacity.toLong - 1 // leave space for End or Fail
     for {
       _         <- UIO(sub.request(capacity)).toManaged_
       requested <- RefM.make(capacity).toManaged_
-    } yield q.take.flatMap {
-      case Exit.Success(value) =>
-        requested.getAndUpdate {
-          case 1 => UIO(sub.request(capacity)).as(capacity)
-          case n => UIO.succeedNow(n - 1)
-        } *> Pull.emit(value)
-      case Exit.Failure(cause) =>
-        Cause.sequenceCauseOption(cause) match {
-          case Some(cause) => Pull.halt(cause)
-          case None        => Pull.end
-        }
+      lastP     <- Promise.make[Option[Throwable], Chunk[A]].toManaged_
+    } yield lastP.isDone.flatMap {
+      case true => lastP.await
+      case false =>
+        @tailrec
+        def takesToPull(
+          takes: List[Exit[Option[Throwable], A]],
+          chunk: Chunk[A]
+        ): IO[Option[Throwable], Chunk[A]] =
+          takes match {
+            case Nil =>
+              val request = chunk.size
+              requested.getAndUpdate {
+                case `request` => UIO(sub.request(capacity)).as(capacity)
+                case n         => UIO.succeedNow(n - request)
+              } *> Pull.emit(chunk)
+            case Exit.Success(v) :: tail =>
+              takesToPull(tail, chunk :+ v)
+            case Exit.Failure(cause) :: _ =>
+              val pull =
+                Cause.sequenceCauseOption(cause) match {
+                  case Some(cause) => Pull.halt(cause)
+                  case None        => Pull.end
+                }
+              if (chunk.isEmpty) pull else lastP.complete(pull) *> Pull.emit(chunk)
+          }
+
+        q.takeBetween(1, q.capacity).flatMap(takesToPull(_, Chunk.empty))
     }
   }
 
   private def makeSubscriber[A](
     capacity: Int
-  ): UManaged[(Subscriber[A], Promise[Throwable, (Subscription, Queue[Take[Throwable, A]])])] =
+  ): UManaged[(Subscriber[A], Promise[Throwable, (Subscription, Queue[Exit[Option[Throwable], A]])])] =
     for {
       q <- Queue
-            .bounded[Take[Throwable, A]](capacity)
+            .bounded[Exit[Option[Throwable], A]](capacity)
             .toManaged(_.shutdown)
       p <- Promise
-            .make[Throwable, (Subscription, Queue[Take[Throwable, A]])]
+            .make[Throwable, (Subscription, Queue[Exit[Option[Throwable], A]])]
             .toManaged(p => ZIO.whenM(p.isDone)(p.await.fold(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel()) })))
       runtime <- ZIO.runtime[Any].toManaged_
     } yield {
@@ -117,7 +135,7 @@ object Adapters {
               runtime.unsafeRun(q.offer(Exit.fail(Some(e))))
               throw e
             } else {
-              runtime.unsafeRunSync(q.offer(Exit.succeed(Chunk.single(t))))
+              runtime.unsafeRunSync(q.offer(Exit.succeed(t)))
               ()
             }
 
@@ -131,7 +149,7 @@ object Adapters {
             }
 
           override def onComplete(): Unit =
-            runtime.unsafeRun(q.offer(Take.End).unit)
+            runtime.unsafeRun(q.offer(Exit.fail(None)).unit)
         }
       (subscriber, p)
     }
