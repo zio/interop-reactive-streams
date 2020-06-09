@@ -2,12 +2,11 @@ import sbt._
 import Keys._
 
 import explicitdeps.ExplicitDepsPlugin.autoImport._
+import dotty.tools.sbtplugin.DottyPlugin.autoImport._
 import sbtbuildinfo._
 import BuildInfoKeys._
 
 object BuildHelper {
-  val compileOnlyDeps = Seq("com.github.ghik" %% "silencer-lib" % "1.4.2" % "provided")
-
   private val stdOptions = Seq(
     "-deprecation",
     "-encoding",
@@ -33,6 +32,8 @@ object BuildHelper {
     buildInfoPackage := "zio",
     buildInfoObject := "BuildInfoInteropReactiveStreams"
   )
+
+  val dottyVersion = "0.23.0-RC1"
 
   def extraOptions(scalaVersion: String) =
     CrossVersion.partialVersion(scalaVersion) match {
@@ -72,13 +73,19 @@ object BuildHelper {
   def stdSettings(prjName: String) = Seq(
     name := s"$prjName",
     scalacOptions := stdOptions,
-    crossScalaVersions := Seq("2.13.0", "2.12.9", "2.11.12"),
+    crossScalaVersions := Seq("2.13.0", "2.12.9", "2.11.12", dottyVersion),
     scalaVersion in ThisBuild := crossScalaVersions.value.head,
     scalacOptions := stdOptions ++ extraOptions(scalaVersion.value),
-    libraryDependencies ++= compileOnlyDeps ++ Seq(
-      compilerPlugin("org.typelevel"   %% "kind-projector"  % "0.10.3"),
-      compilerPlugin("com.github.ghik" %% "silencer-plugin" % "1.4.2")
-    ),
+    libraryDependencies ++= {
+      if (isDotty.value)
+        Seq(("com.github.ghik" % "silencer-lib_2.13.1" % "1.6.0" % Provided).withDottyCompat(scalaVersion.value))
+      else
+        Seq(
+          "com.github.ghik" %% "silencer-lib" % "1.4.2" % "provided",
+          compilerPlugin("org.typelevel"   %% "kind-projector"  % "0.10.3"),
+          compilerPlugin("com.github.ghik" %% "silencer-plugin" % "1.4.2")
+        )
+    },
     parallelExecution in Test := true,
     incOptions ~= (_.withLogRecompileOnMacro(false))
   )

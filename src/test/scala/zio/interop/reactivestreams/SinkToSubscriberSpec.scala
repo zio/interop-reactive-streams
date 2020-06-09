@@ -131,7 +131,8 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
 
   val managedVerification =
     for {
-      (subscriber, _) <- Sink.collectAll[Int].toSubscriber[Clock]()
+      subscriber_     <- Sink.collectAll[Int].toSubscriber[Clock]()
+      (subscriber, _) = subscriber_
       sbv <- ZManaged.make {
               val env = new TestEnvironment(1000, 500)
               val sbv =
