@@ -9,7 +9,7 @@ import zio.stream.ZStream.Pull
 object Adapters {
 
   def streamToPublisher[R, E <: Throwable, A](stream: ZStream[R, E, A]): ZIO[R, Nothing, Publisher[A]] =
-    ZIO.runtime.map { runtime => (subscriber: Subscriber[_ >: A]) =>
+    ZIO.runtime.map { runtime => subscriber =>
       if (subscriber == null) {
         throw new NullPointerException("Subscriber must not be null.")
       } else {
@@ -41,9 +41,11 @@ object Adapters {
   def publisherToStream[A](publisher: Publisher[A], bufferSize: Int): ZStream[Any, Throwable, A] = {
     val pullOrFail =
       for {
-        (subscriber, p) <- makeSubscriber[A](bufferSize)
+        subscriberP     <- makeSubscriber[A](bufferSize)
+        (subscriber, p) = subscriberP
         _               <- UIO(publisher.subscribe(subscriber)).toManaged_
-        (sub, q)        <- p.await.toManaged_
+        subQ            <- p.await.toManaged_
+        (sub, q)        = subQ
         process         <- process(q, sub)
       } yield process
     val pull = pullOrFail.catchAll(e => UIO(Pull.fail(e)).toManaged_)
@@ -55,7 +57,8 @@ object Adapters {
     bufferSize: Int
   ): ZManaged[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
     for {
-      (subscriber, p) <- makeSubscriber[A](bufferSize)
+      subscriberP     <- makeSubscriber[A](bufferSize)
+      (subscriber, p) = subscriberP
       pull = p.await.toManaged_.flatMap { case (subscription, q) => process(q, subscription) }
         .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
       fiber <- ZStream(pull).run(sink).toManaged_.fork

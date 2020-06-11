@@ -33,7 +33,6 @@ inThisBuild(
 
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
-addCompilerPlugin("com.olegpy" %% "better-monadic-for" % "0.3.1")
 
 val zioVersion        = "1.0.0-RC20"
 val rsVersion         = "1.0.3"
@@ -48,12 +47,17 @@ lazy val interopReactiveStreams = project
   .settings(
     resolvers += Resolver.sonatypeRepo("snapshots"),
     libraryDependencies ++= Seq(
-      "dev.zio"                %% "zio"                     % zioVersion,
-      "dev.zio"                %% "zio-streams"             % zioVersion,
-      "dev.zio"                %% "zio-test"                % zioVersion % Test,
-      "dev.zio"                %% "zio-test-sbt"            % zioVersion % Test,
-      "org.reactivestreams"    % "reactive-streams"         % rsVersion,
-      "org.reactivestreams"    % "reactive-streams-tck"     % rsVersion % Test,
-      "org.scala-lang.modules" %% "scala-collection-compat" % collCompatVersion % Test
-    )
+      "dev.zio"             %% "zio"                 % zioVersion,
+      "dev.zio"             %% "zio-streams"         % zioVersion,
+      "dev.zio"             %% "zio-test"            % zioVersion % Test,
+      "dev.zio"             %% "zio-test-sbt"        % zioVersion % Test,
+      "org.reactivestreams" % "reactive-streams"     % rsVersion,
+      "org.reactivestreams" % "reactive-streams-tck" % rsVersion % Test
+    ),
+    libraryDependencies ++= {
+      if (isDotty.value)
+        Seq()
+      else
+        Seq("org.scala-lang.modules" %% "scala-collection-compat" % collCompatVersion % Test)
+    }
   )
