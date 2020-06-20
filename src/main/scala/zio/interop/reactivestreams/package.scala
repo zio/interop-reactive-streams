@@ -6,17 +6,18 @@ import zio.{ IO, Promise, UIO, ZIO, ZManaged }
 
 package object reactivestreams {
 
-  final implicit class streamToPublisher[R, E <: Throwable, A](private val stream: ZStream[R, E, A]) extends AnyVal {
+  final implicit class streamToPublisher[R, E <: Throwable, O](private val stream: ZStream[R, E, O]) extends AnyVal {
 
     /**
      * Create a `Publisher` from a `Stream`. Every time the `Publisher` is subscribed to, a new instance of the `Stream`
      * is run.
      */
-    def toPublisher: ZIO[R, Nothing, Publisher[A]] =
+    def toPublisher: ZIO[R, Nothing, Publisher[O]] =
       Adapters.streamToPublisher(stream)
   }
 
-  final implicit class sinkToSubscriber[R, E <: Throwable, A, B](private val sink: ZSink[R, E, A, B]) extends AnyVal {
+  final implicit class sinkToSubscriber[R, E <: Throwable, A, L, Z](private val sink: ZSink[R, E, A, L, Z])
+      extends AnyVal {
 
     /**
      * Create a `Subscriber` from a `Sink`. The returned IO will eventually return the result of running the subscribed
@@ -26,21 +27,21 @@ package object reactivestreams {
      *              If possible, set to a power of 2 value for best performance.
      *
      */
-    def toSubscriber[R1 <: R](qSize: Int = 16): ZManaged[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
+    def toSubscriber(qSize: Int = 16): ZManaged[R, Throwable, (Subscriber[A], IO[Throwable, Z])] =
       Adapters.sinkToSubscriber(sink, qSize)
   }
 
-  final implicit class publisherToStream[A](private val publisher: Publisher[A]) extends AnyVal {
+  final implicit class publisherToStream[O](private val publisher: Publisher[O]) extends AnyVal {
 
     /**
      * @param qSize The size used as internal buffer. A maximum of `qSize-1` `A`s will be buffered, so `qSize` must be > 1.
      *              If possible, set to a power of 2 value for best performance.
      */
-    def toStream(qSize: Int = 16): ZStream[Any, Throwable, A] =
+    def toStream(qSize: Int = 16): ZStream[Any, Throwable, O] =
       Adapters.publisherToStream(publisher, qSize)
   }
 
-  final implicit class subscriberToSink[A](private val subscriber: Subscriber[A]) extends AnyVal {
+  final implicit class subscriberToSink[I](private val subscriber: Subscriber[I]) extends AnyVal {
 
     /**
      * Create a `Sink` from a `Subscriber`. Errors need to be transported via the returned Promise:
@@ -55,7 +56,7 @@ package object reactivestreams {
      * } yield ()
      * ```
      */
-    def toSink[E <: Throwable]: UIO[(Promise[E, Nothing], ZSink[Any, E, A, Unit])] =
+    def toSink[E <: Throwable]: UIO[(Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
   }
 

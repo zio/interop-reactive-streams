@@ -8,7 +8,7 @@ import zio.stream.ZStream.Pull
 
 object Adapters {
 
-  def streamToPublisher[R, E <: Throwable, A](stream: ZStream[R, E, A]): ZIO[R, Nothing, Publisher[A]] =
+  def streamToPublisher[R, E <: Throwable, O](stream: ZStream[R, E, O]): ZIO[R, Nothing, Publisher[O]] =
     ZIO.runtime.map { runtime => subscriber =>
       if (subscriber == null) {
         throw new NullPointerException("Subscriber must not be null.")
@@ -26,9 +26,9 @@ object Adapters {
       }
     }
 
-  def subscriberToSink[E <: Throwable, A](
-    subscriber: Subscriber[A]
-  ): UIO[(Promise[E, Nothing], ZSink[Any, Nothing, A, Unit])] =
+  def subscriberToSink[E <: Throwable, I](
+    subscriber: Subscriber[I]
+  ): UIO[(Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
     for {
       runtime      <- ZIO.runtime[Any]
       demand       <- Queue.unbounded[Long]
@@ -38,10 +38,10 @@ object Adapters {
       _            <- error.await.catchAll(t => UIO(subscriber.onError(t)) *> demand.shutdown).forkDaemon
     } yield (error, demandUnfoldSink(subscriber, demand))
 
-  def publisherToStream[A](publisher: Publisher[A], bufferSize: Int): ZStream[Any, Throwable, A] = {
+  def publisherToStream[O](publisher: Publisher[O], bufferSize: Int): ZStream[Any, Throwable, O] = {
     val pullOrFail =
       for {
-        subscriberP     <- makeSubscriber[A](bufferSize)
+        subscriberP     <- makeSubscriber[O](bufferSize)
         (subscriber, p) = subscriberP
         _               <- UIO(publisher.subscribe(subscriber)).toManaged_
         subQ            <- p.await.toManaged_
@@ -52,12 +52,12 @@ object Adapters {
     ZStream(pull)
   }
 
-  def sinkToSubscriber[R, R1 <: R, A, B](
-    sink: ZSink[R, Throwable, A, B],
+  def sinkToSubscriber[R, I, L, Z](
+    sink: ZSink[R, Throwable, I, L, Z],
     bufferSize: Int
-  ): ZManaged[R1, Throwable, (Subscriber[A], IO[Throwable, B])] =
+  ): ZManaged[R, Throwable, (Subscriber[I], IO[Throwable, Z])] =
     for {
-      subscriberP     <- makeSubscriber[A](bufferSize)
+      subscriberP     <- makeSubscriber[I](bufferSize)
       (subscriber, p) = subscriberP
       pull = p.await.toManaged_.flatMap { case (subscription, q) => process(q, subscription) }
         .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
@@ -159,12 +159,12 @@ object Adapters {
       (subscriber, p)
     }
 
-  def demandUnfoldSink[A](
-    subscriber: Subscriber[_ >: A],
+  def demandUnfoldSink[I](
+    subscriber: Subscriber[_ >: I],
     demand: Queue[Long]
-  ): ZSink[Any, Nothing, A, Unit] =
+  ): ZSink[Any, Nothing, I, I, Unit] =
     ZSink
-      .foldM[Any, Nothing, A, (Long, Boolean)]((0L, true))(_._2) {
+      .foldM[Any, Nothing, I, (Long, Boolean)]((0L, true))(_._2) {
         case (state, a) =>
           demand.isShutdown.flatMap {
             case true                  => UIO((state._1, false))
