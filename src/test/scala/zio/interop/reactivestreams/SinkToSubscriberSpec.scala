@@ -20,7 +20,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
         for {
           (publisher, subscribed, requested, canceled) <- makePublisherProbe
           fiber <- ZSink
-                    .fold[Int, Chunk[Int]](Chunk.empty)(_.size < 5)(_ + _)
+                    .fold[Int, Chunk[Int]](Chunk.empty)(_.size < 5)(_ :+ _)
                     .map(_.toList)
                     .toSubscriber()
                     .use {
@@ -131,7 +131,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
 
   val managedVerification =
     for {
-      subscriber_     <- Sink.collectAll[Int].toSubscriber[Clock]()
+      subscriber_     <- Sink.collectAll[Int].toSubscriber()
       (subscriber, _) = subscriber_
       sbv <- ZManaged.make {
               val env = new TestEnvironment(1000, 500)

@@ -3,7 +3,7 @@ package zio.interop.reactivestreams
 import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualPublisher
-import zio.{ Exit, Promise, Task, UIO, ZIO }
+import zio.{ Chunk, Exit, Promise, Task, UIO, ZIO }
 import zio.duration._
 import zio.stream.{ Sink, Stream }
 import zio.test._
@@ -17,7 +17,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
         assertM(publish(seq, None))(succeeds(equalTo(seq)))
       },
       testM("fails with an initially failed `Publisher`") {
-        assertM(publish(Nil, Some(e)))(fails(equalTo(e)))
+        assertM(publish(Chunk.empty, Some(e)))(fails(equalTo(e)))
       },
       testM("fails with an eventually failing `Publisher`") {
         assertM(publish(seq, Some(e)))(fails(equalTo(e)))
@@ -55,7 +55,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
             _ <- UIO(probe.sendNext(1))
             _ <- UIO(probe.sendCompletion)
             r <- fiber.join
-          } yield assert(r)(equalTo(List(1)))
+          } yield assert(r)(equalTo(Chunk(1)))
         )
       } @@ TestAspect.timeout(1000.millis),
       testM("cancels subscription when interrupted before subscription") {
@@ -134,7 +134,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
     )
 
   val e: Throwable    = new RuntimeException("boom")
-  val seq: List[Int]  = List.range(0, 100)
+  val seq: Chunk[Int] = Chunk.fromIterable(List.range(0, 100))
   val bufferSize: Int = 10
 
   def withProbe[R, E0, E >: Throwable, A](f: ManualPublisher[Int] => ZIO[R, E, A]): ZIO[R, E, A] = {
@@ -143,9 +143,9 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
     f(probe) <* Task(testEnv.verifyNoAsyncErrorsNoDelay())
   }
 
-  def publish(seq: List[Int], failure: Option[Throwable]): UIO[Exit[Throwable, List[Int]]] = {
+  def publish(seq: Chunk[Int], failure: Option[Throwable]): UIO[Exit[Throwable, Chunk[Int]]] = {
 
-    def loop(probe: ManualPublisher[Int], remaining: List[Int]): Task[Unit] =
+    def loop(probe: ManualPublisher[Int], remaining: Chunk[Int]): Task[Unit] =
       for {
         n             <- Task(probe.expectRequest())
         _             <- Task(assert(n.toInt)(isLessThanEqualTo(bufferSize)))
