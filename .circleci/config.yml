@@ -4,13 +4,13 @@ scala_211: &scala_211
   SCALA_VERSION: 2.11.12
 
 scala_212: &scala_212
-  SCALA_VERSION: 2.12.11
+  SCALA_VERSION: 2.12.13
 
 scala_213: &scala_213
-  SCALA_VERSION: 2.13.2
+  SCALA_VERSION: 2.13.3
 
 scala_dotty: &scala_dotty
-  SCALA_VERSION: 0.23.0-RC1
+  SCALA_VERSION: 0.26.0-RC1
 
 jdk_8: &jdk_8
   JDK_VERSION: 8
