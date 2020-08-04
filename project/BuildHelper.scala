@@ -33,7 +33,7 @@ object BuildHelper {
     buildInfoObject := "BuildInfoInteropReactiveStreams"
   )
 
-  val dottyVersion = "0.23.0-RC1"
+  val dottyVersion = "0.26.0-RC1"
 
   def extraOptions(scalaVersion: String) =
     CrossVersion.partialVersion(scalaVersion) match {
@@ -76,7 +76,7 @@ object BuildHelper {
   def stdSettings(prjName: String) = Seq(
     name := s"$prjName",
     scalacOptions := stdOptions,
-    crossScalaVersions := Seq("2.13.2", "2.12.11", "2.11.12", dottyVersion),
+    crossScalaVersions := Seq("2.13.3", "2.12.12", "2.11.12", dottyVersion),
     scalaVersion in ThisBuild := crossScalaVersions.value.head,
     scalacOptions := stdOptions ++ extraOptions(scalaVersion.value),
     parallelExecution in Test := true,
