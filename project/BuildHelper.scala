@@ -33,7 +33,7 @@ object BuildHelper {
     buildInfoObject := "BuildInfoInteropReactiveStreams"
   )
 
-  val dottyVersion = "0.26.0-RC1"
+  val dottyVersion = "0.27.0-RC1"
 
   def extraOptions(scalaVersion: String) =
     CrossVersion.partialVersion(scalaVersion) match {
