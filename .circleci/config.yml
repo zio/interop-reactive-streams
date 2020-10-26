@@ -67,10 +67,10 @@ save_cache: &save_cache
   - save_cache:
       key: sbt-cache-interop-reactive-streams
       paths:
-          - "~/.ivy2/cache"
-          - "~/.sbt"
-          - "~/.m2"
-          - "~/.cache"
+        - "~/.ivy2/cache"
+        - "~/.sbt"
+        - "~/.m2"
+        - "~/.cache"
 
 compile: &compile
   steps:
@@ -103,7 +103,7 @@ testJVM: &testJVM
     - <<: *install_jdk
     - run:
         name: Run tests
-        command: ./sbt ++${SCALA_VERSION}! test
+        command: ./sbt ++${SCALA_VERSION}! test doc
     - <<: *clean_cache
     - <<: *save_cache
     - store_test_results:
@@ -116,7 +116,7 @@ release: &release
         name: Fetch git tags
         command: git fetch --tags
     - <<: *load_cache
-    - run: 
+    - run:
         name: Write sonatype credentials
         command: echo "credentials += Credentials(\"Sonatype Nexus Repository Manager\", \"oss.sonatype.org\", \"${SONATYPE_USER}\", \"${SONATYPE_PASSWORD}\")" > ~/.sbt/1.0/sonatype.sbt
     - run:
