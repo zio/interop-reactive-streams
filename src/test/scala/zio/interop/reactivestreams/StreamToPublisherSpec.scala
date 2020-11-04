@@ -53,11 +53,11 @@ object StreamToPublisherSpec extends DefaultRunnableSpec {
           testM(method.getName())(
             for {
               runtime <- ZIO.runtime[Any]
-              pv      = makePV(runtime)
+              pv       = makePV(runtime)
               _       <- UIO(pv.setUp())
-              r <- blocking(Task(method.invoke(pv))).unit.mapError {
-                    case e: InvocationTargetException => e.getTargetException()
-                  }.run
+              r <- blocking(Task(method.invoke(pv))).unit.mapError { case e: InvocationTargetException =>
+                     e.getTargetException()
+                   }.run
             } yield assert(r)(succeeds(isUnit))
           )
       }
