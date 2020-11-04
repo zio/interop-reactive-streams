@@ -43,14 +43,14 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
         withProbe(probe =>
           for {
             fiber <- Stream
-                      .fromEffect(
-                        UIO(
-                          probe.toStream()
-                        )
-                      )
-                      .flatMap(identity)
-                      .run(Sink.collectAll[Int])
-                      .fork
+                       .fromEffect(
+                         UIO(
+                           probe.toStream()
+                         )
+                       )
+                       .flatMap(identity)
+                       .run(Sink.collectAll[Int])
+                       .fork
             _ <- Task(probe.expectRequest())
             _ <- UIO(probe.sendNext(1))
             _ <- UIO(probe.sendCompletion)
@@ -65,13 +65,13 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
             cancelledLatch <- Promise.make[Nothing, Unit]
             runtime        <- ZIO.runtime[Any]
             subscription = new Subscription {
-              override def request(x$1: Long): Unit = ()
-              override def cancel(): Unit           = runtime.unsafeRun(cancelledLatch.succeed(()).unit)
-            }
+                             override def request(x$1: Long): Unit = ()
+                             override def cancel(): Unit           = runtime.unsafeRun(cancelledLatch.succeed(()).unit)
+                           }
             probe = new Publisher[Int] {
-              override def subscribe(subscriber: Subscriber[_ >: Int]): Unit =
-                runtime.unsafeRun(subscriberP.succeed(subscriber).unit)
-            }
+                      override def subscribe(subscriber: Subscriber[_ >: Int]): Unit =
+                        runtime.unsafeRun(subscriberP.succeed(subscriber).unit)
+                    }
             fiber      <- probe.toStream(bufferSize).run(Sink.drain).fork
             subscriber <- subscriberP.await
             _          <- fiber.interrupt
@@ -147,13 +147,13 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
 
     def loop(probe: ManualPublisher[Int], remaining: Chunk[Int]): Task[Unit] =
       for {
-        n             <- Task(probe.expectRequest())
-        _             <- Task(assert(n.toInt)(isLessThanEqualTo(bufferSize)))
+        n            <- Task(probe.expectRequest())
+        _            <- Task(assert(n.toInt)(isLessThanEqualTo(bufferSize)))
         split         = n.toInt
         (nextN, tail) = remaining.splitAt(split)
-        _             <- Task(nextN.foreach(probe.sendNext))
+        _            <- Task(nextN.foreach(probe.sendNext))
         _ <- if (nextN.size < split) Task(failure.fold(probe.sendCompletion())(probe.sendError))
-            else loop(probe, tail)
+             else loop(probe, tail)
       } yield ()
 
     val faillable =

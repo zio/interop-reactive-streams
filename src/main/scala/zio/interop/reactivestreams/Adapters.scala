@@ -18,9 +18,9 @@ object Adapters {
             demand <- Queue.unbounded[Long]
             _      <- UIO(subscriber.onSubscribe(createSubscription(subscriber, demand, runtime)))
             _ <- stream
-                  .run(demandUnfoldSink(subscriber, demand))
-                  .catchAll(e => UIO(subscriber.onError(e)))
-                  .forkDaemon
+                   .run(demandUnfoldSink(subscriber, demand))
+                   .catchAll(e => UIO(subscriber.onError(e)))
+                   .forkDaemon
           } yield ()
         )
       }
@@ -30,23 +30,23 @@ object Adapters {
     subscriber: Subscriber[I]
   ): UIO[(Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
     for {
-      runtime      <- ZIO.runtime[Any]
-      demand       <- Queue.unbounded[Long]
-      error        <- Promise.make[E, Nothing]
+      runtime     <- ZIO.runtime[Any]
+      demand      <- Queue.unbounded[Long]
+      error       <- Promise.make[E, Nothing]
       subscription = createSubscription(subscriber, demand, runtime)
-      _            <- UIO(subscriber.onSubscribe(subscription))
-      _            <- error.await.catchAll(t => UIO(subscriber.onError(t)) *> demand.shutdown).forkDaemon
+      _           <- UIO(subscriber.onSubscribe(subscription))
+      _           <- error.await.catchAll(t => UIO(subscriber.onError(t)) *> demand.shutdown).forkDaemon
     } yield (error, demandUnfoldSink(subscriber, demand))
 
   def publisherToStream[O](publisher: Publisher[O], bufferSize: Int): ZStream[Any, Throwable, O] = {
     val pullOrFail =
       for {
-        subscriberP     <- makeSubscriber[O](bufferSize)
+        subscriberP    <- makeSubscriber[O](bufferSize)
         (subscriber, p) = subscriberP
-        _               <- UIO(publisher.subscribe(subscriber)).toManaged_
-        subQ            <- p.await.toManaged_
+        _              <- UIO(publisher.subscribe(subscriber)).toManaged_
+        subQ           <- p.await.toManaged_
         (sub, q)        = subQ
-        process         <- process(q, sub)
+        process        <- process(q, sub)
       } yield process
     val pull = pullOrFail.catchAll(e => UIO(Pull.fail(e)).toManaged_)
     ZStream(pull)
@@ -57,10 +57,10 @@ object Adapters {
     bufferSize: Int
   ): ZManaged[R, Throwable, (Subscriber[I], IO[Throwable, Z])] =
     for {
-      subscriberP     <- makeSubscriber[I](bufferSize)
+      subscriberP    <- makeSubscriber[I](bufferSize)
       (subscriber, p) = subscriberP
       pull = p.await.toManaged_.flatMap { case (subscription, q) => process(q, subscription) }
-        .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
+               .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
       fiber <- ZStream(pull).run(sink).toManaged_.fork
     } yield (subscriber, fiber.join)
 
@@ -108,13 +108,13 @@ object Adapters {
   ): UManaged[(Subscriber[A], Promise[Throwable, (Subscription, Queue[Exit[Option[Throwable], A]])])] =
     for {
       q <- Queue
-            .bounded[Exit[Option[Throwable], A]](capacity)
-            .toManaged(_.shutdown)
+             .bounded[Exit[Option[Throwable], A]](capacity)
+             .toManaged(_.shutdown)
       p <- Promise
-            .make[Throwable, (Subscription, Queue[Exit[Option[Throwable], A]])]
-            .toManaged(p =>
-              p.poll.flatMap(_.fold(UIO.unit)(_.foldM(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel()) })))
-            )
+             .make[Throwable, (Subscription, Queue[Exit[Option[Throwable], A]])]
+             .toManaged(p =>
+               p.poll.flatMap(_.fold(UIO.unit)(_.foldM(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel()) })))
+             )
       runtime <- ZIO.runtime[Any].toManaged_
     } yield {
 
@@ -164,13 +164,12 @@ object Adapters {
     demand: Queue[Long]
   ): ZSink[Any, Nothing, I, I, Unit] =
     ZSink
-      .foldM[Any, Nothing, I, (Long, Boolean)]((0L, true))(_._2) {
-        case (state, a) =>
-          demand.isShutdown.flatMap {
-            case true                  => UIO((state._1, false))
-            case false if state._1 > 0 => UIO(subscriber.onNext(a)).as((state._1 - 1, true))
-            case false                 => demand.take.flatMap(n => UIO(subscriber.onNext(a)).as((n - 1, true)))
-          }
+      .foldM[Any, Nothing, I, (Long, Boolean)]((0L, true))(_._2) { case (state, a) =>
+        demand.isShutdown.flatMap {
+          case true                  => UIO((state._1, false))
+          case false if state._1 > 0 => UIO(subscriber.onNext(a)).as((state._1 - 1, true))
+          case false                 => demand.take.flatMap(n => UIO(subscriber.onNext(a)).as((n - 1, true)))
+        }
       }
       .mapM(_ => demand.isShutdown.flatMap(is => UIO(subscriber.onComplete()).when(!is)))
 

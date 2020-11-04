@@ -25,7 +25,6 @@ package object reactivestreams {
      * propagates from the `Zmanaged` to the stream, but not from the IO.
      * @param qSize The size used as internal buffer. A maximum of `qSize-1` `A`s will be buffered, so `qSize` must be > 1.
      *              If possible, set to a power of 2 value for best performance.
-     *
      */
     def toSubscriber(qSize: Int = 16): ZManaged[R, Throwable, (Subscriber[A], IO[Throwable, Z])] =
       Adapters.sinkToSubscriber(sink, qSize)
