@@ -31,6 +31,8 @@ inThisBuild(
   )
 )
 
+Global / onChangedBuildSource := ReloadOnSourceChanges
+
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
 
@@ -41,11 +43,11 @@ val collCompatVersion = "2.2.0"
 lazy val interopReactiveStreams = project
   .in(file("."))
   .enablePlugins(BuildInfoPlugin)
+  .settings(buildInfoSettings("zio.interop.reactivestreams"))
   .settings(stdSettings("zio-interop-reactivestreams"))
-  .settings(buildInfoSettings)
+  .settings(dottySettings)
   .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
   .settings(
-    resolvers += Resolver.sonatypeRepo("snapshots"),
     libraryDependencies ++= Seq(
       "dev.zio"             %% "zio"                 % zioVersion,
       "dev.zio"             %% "zio-streams"         % zioVersion,
