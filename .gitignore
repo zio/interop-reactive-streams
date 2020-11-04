@@ -1,11 +1,11 @@
 .bloop
+.bsp
 .metals
 .sbtopts
 project/.sbt
 project/travis-deploy-key
 project/secrets.tar.xz
 project/zecret
+project/metals.sbt
 target
 test-output/
-
-project/metals.sbt
