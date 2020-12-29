@@ -1,6 +1,6 @@
 # Interop reactive streams
 
-[![CircleCI][Badge-Circle]][Link-Circle]
+![CI][Badge-CI]
 [![Releases][Badge-SonatypeReleases]][Link-SonatypeReleases]
 [![Snapshots][Badge-SonatypeSnapshots]][Link-SonatypeSnapshots]
 
@@ -92,7 +92,7 @@ runtime.unsafeRun(
 )
 ```
 
-[Badge-Circle]: https://circleci.com/gh/zio/interop-reactive-streams/tree/master.svg?style=svg
+[Badge-CI]: https://github.com/zio/interop-reactive-streams/workflows/CI/badge.svg
 [Badge-SonatypeReleases]: https://img.shields.io/nexus/r/https/oss.sonatype.org/dev.zio/zio-interop-reactivestreams_2.12.svg "Sonatype Releases"
 [Badge-SonatypeSnapshots]: https://img.shields.io/nexus/s/https/oss.sonatype.org/dev.zio/zio-interop-reactivestreams_2.12.svg "Sonatype Snapshots"
 [Link-Circle]: https://circleci.com/gh/zio/interop-reactive-streams/tree/master
