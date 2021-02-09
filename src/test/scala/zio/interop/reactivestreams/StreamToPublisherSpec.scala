@@ -55,7 +55,7 @@ object StreamToPublisherSpec extends DefaultRunnableSpec {
               runtime <- ZIO.runtime[Any]
               pv       = makePV(runtime)
               _       <- UIO(pv.setUp())
-              r <- blocking(Task(method.invoke(pv))).unit.mapError { case e: InvocationTargetException =>
+              r <- blocking(Task(method.invoke(pv))).unit.refineOrDie { case e: InvocationTargetException =>
                      e.getTargetException()
                    }.run
             } yield assert(r)(succeeds(isUnit))
