@@ -9,3 +9,4 @@ project/zecret
 project/metals.sbt
 target
 test-output/
+metals.sbt

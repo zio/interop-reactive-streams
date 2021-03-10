@@ -13,29 +13,37 @@ object SubscriberToSinkSpec extends DefaultRunnableSpec {
   override def spec =
     suite("Converting a `Subscriber` to a `Sink`")(
       testM("works on the happy path") {
-        for {
-          probe        <- makeSubscriber
-          errorSink    <- probe.underlying.toSink[Throwable]
-          (error, sink) = errorSink
-          fiber        <- Stream.fromIterable(seq).run(sink).fork
-          _            <- probe.request(length + 1)
-          elements     <- probe.nextElements(length).run
-          completion   <- probe.expectCompletion.run
-          _            <- fiber.join
-        } yield assert(elements)(succeeds(equalTo(seq))) && assert(completion)(succeeds(isUnit))
+        val probeErrorSink =
+          for {
+            probe     <- makeSubscriber.toManaged_
+            errorSink <- probe.underlying.toSink[Throwable]
+          } yield (probe, errorSink)
+        probeErrorSink.use { case (probe, (_, sink)) =>
+          for {
+            fiber      <- Stream.fromIterable(seq).run(sink).fork
+            _          <- probe.request(length + 1)
+            elements   <- probe.nextElements(length).run
+            completion <- probe.expectCompletion.run
+            _          <- fiber.join
+          } yield assert(elements)(succeeds(equalTo(seq))) && assert(completion)(succeeds(isUnit))
+        }
       },
       testM("transports errors") {
-        for {
-          probe        <- makeSubscriber
-          errorSink    <- probe.underlying.toSink[Throwable]
-          (error, sink) = errorSink
-          fiber <- (Stream.fromIterable(seq) ++
-                     Stream.fail(e)).run(sink).catchAll(t => error.fail(t)).fork
-          _        <- probe.request(length + 1)
-          elements <- probe.nextElements(length).run
-          err      <- probe.expectError.run
-          _        <- fiber.join
-        } yield assert(elements)(succeeds(equalTo(seq))) && assert(err)(succeeds(equalTo(e)))
+        val probeErrorSink =
+          for {
+            probe     <- makeSubscriber.toManaged_
+            errorSink <- probe.underlying.toSink[Throwable]
+          } yield (probe, errorSink)
+        probeErrorSink.use { case (probe, (error, sink)) =>
+          for {
+            fiber <- (Stream.fromIterable(seq) ++
+                       Stream.fail(e)).run(sink).catchAll(t => error.fail(t)).fork
+            _        <- probe.request(length + 1)
+            elements <- probe.nextElements(length).run
+            err      <- probe.expectError.run
+            _        <- fiber.join
+          } yield assert(elements)(succeeds(equalTo(seq))) && assert(err)(succeeds(equalTo(e)))
+        }
       }
     )
 
