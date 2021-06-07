@@ -2,11 +2,13 @@
 .bsp
 .metals
 .sbtopts
+.vscode
+metals.sbt
 project/.sbt
-project/travis-deploy-key
-project/secrets.tar.xz
-project/zecret
 project/metals.sbt
+project/secrets.tar.xz
+project/travis-deploy-key
+project/zecret
 target
 test-output/
 metals.sbt
