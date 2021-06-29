@@ -2,7 +2,7 @@ package zio.interop
 
 import org.reactivestreams.{ Publisher, Subscriber }
 import zio.stream.{ ZSink, ZStream }
-import zio.{ IO, Promise, UIO, ZIO, ZManaged }
+import zio.{ IO, Promise, ZIO, ZManaged }
 
 package object reactivestreams {
 
@@ -51,11 +51,11 @@ package object reactivestreams {
      * for {
      *   sinkError <- subscriberToSink(subscriber)
      *   (error, sink) = sinkError
-     *   _ <- stream.run(sink).catchAll(e => error.fail(e)).fork
+     *   _ <- stream.run(sink).catchAll(e => error.fail(e)).toManaged_.fork
      * } yield ()
      * ```
      */
-    def toSink[E <: Throwable]: UIO[(Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
+    def toSink[E <: Throwable]: ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
   }
 
