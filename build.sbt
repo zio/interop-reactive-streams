@@ -3,8 +3,8 @@ import BuildHelper._
 inThisBuild(
   List(
     organization := "dev.zio",
-    homepage := Some(url("https://zio.dev")),
-    licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
+    homepage     := Some(url("https://zio.dev")),
+    licenses     := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
     developers := List(
       Developer(
         "runtologist",
@@ -36,7 +36,7 @@ Global / onChangedBuildSource := ReloadOnSourceChanges
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
 
-val zioVersion        = "1.0.10"
+val zioVersion        = "1.0.11"
 val rsVersion         = "1.0.3"
 val collCompatVersion = "2.5.0"
 

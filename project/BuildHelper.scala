@@ -11,7 +11,7 @@ object BuildHelper {
   val Scala211   = "2.11.12"
   val Scala212   = "2.12.14"
   val Scala213   = "2.13.6"
-  val ScalaDotty = "3.0.1"
+  val ScalaDotty = "3.0.2"
 
   private val stdOptions = Seq(
     "-deprecation",
@@ -51,9 +51,9 @@ object BuildHelper {
 
   def buildInfoSettings(packageName: String) =
     Seq(
-      buildInfoKeys := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, isSnapshot),
+      buildInfoKeys    := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, isSnapshot),
       buildInfoPackage := packageName,
-      buildInfoObject := "BuildInfo"
+      buildInfoObject  := "BuildInfo"
     )
 
   val dottySettings = Seq(
@@ -131,13 +131,13 @@ object BuildHelper {
     }
 
   def stdSettings(prjName: String) = Seq(
-    name := s"$prjName",
-    crossScalaVersions := Seq(Scala211, Scala212, Scala213),
+    name                     := s"$prjName",
+    crossScalaVersions       := Seq(Scala211, Scala212, Scala213),
     ThisBuild / scalaVersion := Scala213,
-    scalacOptions := stdOptions ++ extraOptions(scalaVersion.value, optimize = !isSnapshot.value),
-    semanticdbEnabled := !(scalaVersion.value == ScalaDotty), // enable SemanticDB
+    scalacOptions            := stdOptions ++ extraOptions(scalaVersion.value, optimize = !isSnapshot.value),
+    semanticdbEnabled        := !(scalaVersion.value == ScalaDotty), // enable SemanticDB
     semanticdbOptions += "-P:semanticdb:synthetics:on",
-    semanticdbVersion := scalafixSemanticdb.revision, // use Scalafix compatible version
+    semanticdbVersion                      := scalafixSemanticdb.revision, // use Scalafix compatible version
     ThisBuild / scalafixScalaBinaryVersion := CrossVersion.binaryScalaVersion(scalaVersion.value),
     ThisBuild / scalafixDependencies ++= List(
       "com.github.liancheng" %% "organize-imports" % "0.5.0",
