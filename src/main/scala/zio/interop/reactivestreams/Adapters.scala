@@ -164,12 +164,22 @@ object Adapters {
     demand: Queue[Long]
   ): ZSink[Any, Nothing, I, I, Unit] =
     ZSink
-      .foldM[Any, Nothing, I, (Long, Boolean)]((0L, true))(_._2) { case (state, a) =>
-        demand.isShutdown.flatMap {
-          case true                  => UIO((state._1, false))
-          case false if state._1 > 0 => UIO(subscriber.onNext(a)).as((state._1 - 1, true))
-          case false                 => demand.take.flatMap(n => UIO(subscriber.onNext(a)).as((n - 1, true)))
-        }
+      .foldChunksM[Any, Nothing, I, Long](0L)(_ >= 0L) { (bufferedDemand, chunk) =>
+        UIO
+          .iterate((chunk, bufferedDemand))(!_._1.isEmpty) { case (chunk, bufferedDemand) =>
+            demand.isShutdown.flatMap {
+              case true => UIO((Chunk.empty, -1))
+              case false =>
+                if (chunk.size.toLong <= bufferedDemand)
+                  UIO
+                    .foreach(chunk)(a => UIO(subscriber.onNext(a)))
+                    .as((Chunk.empty, bufferedDemand - chunk.size.toLong))
+                else
+                  UIO.foreach(chunk.take(bufferedDemand.toInt))(a => UIO(subscriber.onNext(a))) *>
+                    demand.take.map((chunk.drop(bufferedDemand.toInt), _))
+            }
+          }
+          .map(_._2)
       }
       .mapM(_ => demand.isShutdown.flatMap(is => UIO(subscriber.onComplete()).when(!is)))
 
