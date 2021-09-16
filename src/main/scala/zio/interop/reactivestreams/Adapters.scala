@@ -87,7 +87,7 @@ object Adapters {
       ): Pull[Any, Throwable, A] =
         takes match {
           case Exit.Success(a) :: tail =>
-            builder.addOne(a)
+            builder += a
             takesToPull(builder)(tail)
           case Exit.Failure(cause) :: _ =>
             val chunk = builder.result()
