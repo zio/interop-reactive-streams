@@ -1,10 +1,14 @@
 package zio.interop.reactivestreams
 
-import org.reactivestreams.{ Publisher, Subscriber, Subscription }
-import scala.annotation.tailrec
+import org.reactivestreams.Publisher
+import org.reactivestreams.Subscriber
+import org.reactivestreams.Subscription
 import zio._
-import zio.stream.{ ZSink, ZStream }
+import zio.stream.ZSink
+import zio.stream.ZStream
 import zio.stream.ZStream.Pull
+
+import scala.annotation.tailrec
 
 object Adapters {
 
@@ -73,33 +77,46 @@ object Adapters {
       _         <- UIO(sub.request(capacity)).toManaged_
       requested <- RefM.make(capacity).toManaged_
       lastP     <- Promise.make[Option[Throwable], Chunk[A]].toManaged_
-    } yield lastP.isDone.flatMap {
-      case true => lastP.await
-      case false =>
-        @tailrec
-        def takesToPull(
-          takes: List[Exit[Option[Throwable], A]],
-          chunk: Chunk[A]
-        ): IO[Option[Throwable], Chunk[A]] =
-          takes match {
-            case Nil =>
-              val request = chunk.size
-              requested.getAndUpdate {
-                case `request` => UIO(sub.request(capacity)).as(capacity)
-                case n         => UIO.succeedNow(n - request)
-              } *> Pull.emit(chunk)
-            case Exit.Success(v) :: tail =>
-              takesToPull(tail, chunk :+ v)
-            case Exit.Failure(cause) :: _ =>
-              val pull =
-                Cause.sequenceCauseOption(cause) match {
-                  case Some(cause) => Pull.halt(cause)
-                  case None        => Pull.end
-                }
-              if (chunk.isEmpty) pull else lastP.complete(pull) *> Pull.emit(chunk)
-          }
+    } yield {
 
-        q.takeBetween(1, q.capacity).flatMap(takesToPull(_, Chunk.empty))
+      @tailrec
+      def takesToPull(
+        builder: ChunkBuilder[A] = ChunkBuilder.make[A]()
+      )(
+        takes: List[Exit[Option[Throwable], A]]
+      ): Pull[Any, Throwable, A] =
+        takes match {
+          case Exit.Success(a) :: tail =>
+            builder += a
+            takesToPull(builder)(tail)
+          case Exit.Failure(cause) :: _ =>
+            val chunk = builder.result()
+            val pull = Cause.sequenceCauseOption(cause) match {
+              case Some(cause) => Pull.halt(cause)
+              case None        => Pull.end
+            }
+            if (chunk.isEmpty) pull else lastP.complete(pull) *> Pull.emit(chunk)
+          case Nil =>
+            val chunk = builder.result()
+            val pull  = Pull.emit(chunk)
+
+            if (chunk.isEmpty) pull
+            else {
+              val chunkSize = chunk.size
+              val request =
+                requested.getAndUpdate {
+                  case `chunkSize` => UIO(sub.request(capacity)).as(capacity)
+                  case n           => UIO.succeedNow(n - chunkSize)
+                }
+              request *> pull
+            }
+        }
+
+      lastP.isDone.flatMap {
+        case true  => lastP.await
+        case false => q.takeBetween(1, q.capacity).flatMap(takesToPull())
+      }
+
     }
   }
 
@@ -164,12 +181,22 @@ object Adapters {
     demand: Queue[Long]
   ): ZSink[Any, Nothing, I, I, Unit] =
     ZSink
-      .foldM[Any, Nothing, I, (Long, Boolean)]((0L, true))(_._2) { case (state, a) =>
-        demand.isShutdown.flatMap {
-          case true                  => UIO((state._1, false))
-          case false if state._1 > 0 => UIO(subscriber.onNext(a)).as((state._1 - 1, true))
-          case false                 => demand.take.flatMap(n => UIO(subscriber.onNext(a)).as((n - 1, true)))
-        }
+      .foldChunksM[Any, Nothing, I, Long](0L)(_ >= 0L) { (bufferedDemand, chunk) =>
+        UIO
+          .iterate((chunk, bufferedDemand))(!_._1.isEmpty) { case (chunk, bufferedDemand) =>
+            demand.isShutdown.flatMap {
+              case true => UIO((Chunk.empty, -1))
+              case false =>
+                if (chunk.size.toLong <= bufferedDemand)
+                  UIO
+                    .foreach(chunk)(a => UIO(subscriber.onNext(a)))
+                    .as((Chunk.empty, bufferedDemand - chunk.size.toLong))
+                else
+                  UIO.foreach(chunk.take(bufferedDemand.toInt))(a => UIO(subscriber.onNext(a))) *>
+                    demand.take.map((chunk.drop(bufferedDemand.toInt), _))
+            }
+          }
+          .map(_._2)
       }
       .mapM(_ => demand.isShutdown.flatMap(is => UIO(subscriber.onComplete()).when(!is)))
 
