@@ -7,7 +7,6 @@ import org.testng.annotations.Test
 import zio.Task
 import zio.UIO
 import zio.ZIO
-import zio.blocking._
 import zio.stream.Stream
 import zio.test._
 import zio.test.Assertion._
@@ -50,14 +49,18 @@ object StreamToPublisherSpec extends DefaultRunnableSpec {
         case method if method.getName().startsWith("untested") =>
           test(method.getName())(assert(())(anything)) @@ TestAspect.ignore
         case method =>
-          testM(method.getName())(
+          test(method.getName())(
             for {
               runtime <- ZIO.runtime[Any]
               pv       = makePV(runtime)
               _       <- UIO(pv.setUp())
-              r <- blocking(Task(method.invoke(pv))).unit.refineOrDie { case e: InvocationTargetException =>
-                     e.getTargetException()
-                   }.run
+              r <- Task
+                     .attemptBlockingInterrupt(method.invoke(pv))
+                     .unit
+                     .refineOrDie { case e: InvocationTargetException =>
+                       e.getTargetException()
+                     }
+                     .exit
             } yield assert(r)(succeeds(isUnit))
           )
       }

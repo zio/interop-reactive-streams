@@ -3,12 +3,12 @@ package zio.interop.reactivestreams
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
 import org.reactivestreams.Subscription
+import zio.Exit.Failure
+import zio.Exit.Success
 import zio._
 import zio.stream.ZSink
 import zio.stream.ZStream
 import zio.stream.ZStream.Pull
-
-import scala.annotation.tailrec
 
 object Adapters {
 
@@ -17,7 +17,7 @@ object Adapters {
       if (subscriber == null) {
         throw new NullPointerException("Subscriber must not be null.")
       } else {
-        runtime.unsafeRunAsync_(
+        runtime.unsafeRunAsync(
           for {
             demand <- Queue.unbounded[Long]
             _      <- UIO(subscriber.onSubscribe(createSubscription(subscriber, demand, runtime)))
@@ -47,12 +47,12 @@ object Adapters {
       for {
         subscriberP    <- makeSubscriber[O](bufferSize)
         (subscriber, p) = subscriberP
-        _              <- UIO(publisher.subscribe(subscriber)).toManaged_
-        subQ           <- p.await.toManaged_
+        _              <- ZManaged.succeed(publisher.subscribe(subscriber))
+        subQ           <- p.await.toManaged
         (sub, q)        = subQ
         process        <- process(q, sub)
       } yield process
-    val pull = pullOrFail.catchAll(e => UIO(Pull.fail(e)).toManaged_)
+    val pull = pullOrFail.catchAll(e => ZManaged.succeed(Pull.fail(e)))
     ZStream(pull)
   }
 
@@ -63,9 +63,9 @@ object Adapters {
     for {
       subscriberP    <- makeSubscriber[I](bufferSize)
       (subscriber, p) = subscriberP
-      pull = p.await.toManaged_.flatMap { case (subscription, q) => process(q, subscription) }
+      pull = p.await.toManaged.flatMap { case (subscription, q) => process(q, subscription) }
                .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
-      fiber <- ZStream(pull).run(sink).toManaged_.fork
+      fiber <- ZStream(pull).run(sink).toManaged.fork
     } yield (subscriber, fiber.join)
 
   private def process[R, A](
@@ -74,47 +74,43 @@ object Adapters {
   ): ZManaged[Any, Nothing, ZIO[Any, Option[Throwable], Chunk[A]]] = {
     val capacity = q.capacity.toLong - 1 // leave space for End or Fail
     for {
-      _         <- UIO(sub.request(capacity)).toManaged_
-      requested <- RefM.make(capacity).toManaged_
-      lastP     <- Promise.make[Option[Throwable], Chunk[A]].toManaged_
+      _         <- ZManaged.succeed(sub.request(capacity))
+      requested <- Ref.Synchronized.makeManaged(capacity)
+      lastP     <- Promise.makeManaged[Option[Throwable], Chunk[A]]
     } yield {
 
-      @tailrec
       def takesToPull(
-        builder: ChunkBuilder[A] = ChunkBuilder.make[A]()
-      )(
-        takes: List[Exit[Option[Throwable], A]]
-      ): Pull[Any, Throwable, A] =
-        takes match {
-          case Exit.Success(a) :: tail =>
-            builder += a
-            takesToPull(builder)(tail)
-          case Exit.Failure(cause) :: _ =>
-            val chunk = builder.result()
-            val pull = Cause.sequenceCauseOption(cause) match {
-              case Some(cause) => Pull.halt(cause)
-              case None        => Pull.end
+        takes: Chunk[Exit[Option[Throwable], A]]
+      ): Pull[Any, Throwable, A] = {
+        val toEmit = takes.collectWhile { case Exit.Success(a) => a }
+        val pull   = Pull.emit(toEmit)
+        if (toEmit.size == takes.size) {
+          val chunkSize = toEmit.size
+          val request =
+            requested.getAndUpdateZIO {
+              case `chunkSize` => UIO(sub.request(capacity)).as(capacity)
+              case n           => UIO.succeedNow(n - chunkSize)
             }
-            if (chunk.isEmpty) pull else lastP.complete(pull) *> Pull.emit(chunk)
-          case Nil =>
-            val chunk = builder.result()
-            val pull  = Pull.emit(chunk)
-
-            if (chunk.isEmpty) pull
-            else {
-              val chunkSize = chunk.size
-              val request =
-                requested.getAndUpdate {
-                  case `chunkSize` => UIO(sub.request(capacity)).as(capacity)
-                  case n           => UIO.succeedNow(n - chunkSize)
+          request *> pull
+        } else {
+          val failure = takes.drop(toEmit.size).head
+          failure match {
+            case Failure(cause) =>
+              val last =
+                Cause.flipCauseOption(cause) match {
+                  case None        => Pull.end
+                  case Some(cause) => Pull.failCause(cause)
                 }
-              request *> pull
-            }
+              if (toEmit.isEmpty) last else lastP.complete(last) *> pull
+
+            case Success(_) => pull // should never happen
+          }
         }
+      }
 
       lastP.isDone.flatMap {
         case true  => lastP.await
-        case false => q.takeBetween(1, q.capacity).flatMap(takesToPull())
+        case false => q.takeBetween(1, q.capacity).flatMap(takesToPull)
       }
 
     }
@@ -126,13 +122,13 @@ object Adapters {
     for {
       q <- Queue
              .bounded[Exit[Option[Throwable], A]](capacity)
-             .toManaged(_.shutdown)
+             .toManagedWith(_.shutdown)
       p <- Promise
              .make[Throwable, (Subscription, Queue[Exit[Option[Throwable], A]])]
-             .toManaged(p =>
-               p.poll.flatMap(_.fold(UIO.unit)(_.foldM(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel()) })))
+             .toManagedWith(
+               _.poll.flatMap(_.fold(UIO.unit)(_.foldZIO(_ => UIO.unit, { case (sub, _) => UIO(sub.cancel()) })))
              )
-      runtime <- ZIO.runtime[Any].toManaged_
+      runtime <- ZManaged.runtime[Any]
     } yield {
 
       val subscriber =
@@ -144,11 +140,13 @@ object Adapters {
               runtime.unsafeRun(p.fail(e))
               throw e
             } else {
-              runtime.unsafeRun(p.succeed((s, q)).flatMap {
-                // `whenM(q.isShutdown)`, the Stream has been interrupted or completed before we received `onSubscribe`
-                case true  => UIO(s.cancel()).whenM(q.isShutdown)
-                case false => UIO(s.cancel())
-              })
+              runtime.unsafeRun(
+                p.succeed((s, q)).flatMap {
+                  // `whenM(q.isShutdown)`, the Stream has been interrupted or completed before we received `onSubscribe`
+                  case true  => UIO(s.cancel()).whenZIO(q.isShutdown).unit
+                  case false => UIO(s.cancel())
+                }
+              )
             }
 
           override def onNext(t: A): Unit =
@@ -181,7 +179,7 @@ object Adapters {
     demand: Queue[Long]
   ): ZSink[Any, Nothing, I, I, Unit] =
     ZSink
-      .foldChunksM[Any, Nothing, I, Long](0L)(_ >= 0L) { (bufferedDemand, chunk) =>
+      .foldChunksZIO[Any, Nothing, I, Long](0L)(_ >= 0L) { (bufferedDemand, chunk) =>
         UIO
           .iterate((chunk, bufferedDemand))(!_._1.isEmpty) { case (chunk, bufferedDemand) =>
             demand.isShutdown.flatMap {
@@ -198,7 +196,7 @@ object Adapters {
           }
           .map(_._2)
       }
-      .mapM(_ => demand.isShutdown.flatMap(is => UIO(subscriber.onComplete()).when(!is)))
+      .mapZIO(_ => demand.isShutdown.flatMap(is => UIO(subscriber.onComplete()).when(!is).unit))
 
   def createSubscription[A](
     subscriber: Subscriber[_ >: A],
@@ -208,7 +206,7 @@ object Adapters {
     new Subscription {
       override def request(n: Long): Unit = {
         if (n <= 0) subscriber.onError(new IllegalArgumentException("non-positive subscription request"))
-        runtime.unsafeRunAsync_(demand.offer(n).unit)
+        runtime.unsafeRunAsync(demand.offer(n))
       }
       override def cancel(): Unit = runtime.unsafeRun(demand.shutdown)
     }
