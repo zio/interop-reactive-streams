@@ -9,9 +9,9 @@ import scalafix.sbt.ScalafixPlugin.autoImport._
 
 object BuildHelper {
   val Scala211   = "2.11.12"
-  val Scala212   = "2.12.14"
+  val Scala212   = "2.12.15"
   val Scala213   = "2.13.6"
-  val ScalaDotty = "3.0.0"
+  val ScalaDotty = "3.0.2"
 
   private val stdOptions = Seq(
     "-deprecation",
@@ -51,9 +51,9 @@ object BuildHelper {
 
   def buildInfoSettings(packageName: String) =
     Seq(
-      buildInfoKeys := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, isSnapshot),
+      buildInfoKeys    := Seq[BuildInfoKey](name, version, scalaVersion, sbtVersion, isSnapshot),
       buildInfoPackage := packageName,
-      buildInfoObject := "BuildInfo"
+      buildInfoObject  := "BuildInfo"
     )
 
   val dottySettings = Seq(
@@ -130,91 +130,100 @@ object BuildHelper {
       case _ => Seq.empty
     }
 
-  def stdSettings(prjName: String) = Seq(
-    name := s"$prjName",
-    crossScalaVersions := Seq(Scala211, Scala212, Scala213),
-    ThisBuild / scalaVersion := Scala213,
-    scalacOptions := stdOptions ++ extraOptions(scalaVersion.value, optimize = !isSnapshot.value),
-    semanticdbEnabled := !(scalaVersion.value == ScalaDotty), // enable SemanticDB
-    semanticdbOptions += "-P:semanticdb:synthetics:on",
-    semanticdbVersion := scalafixSemanticdb.revision, // use Scalafix compatible version
-    ThisBuild / scalafixScalaBinaryVersion := CrossVersion.binaryScalaVersion(scalaVersion.value),
-    ThisBuild / scalafixDependencies ++= List(
-      "com.github.liancheng" %% "organize-imports" % "0.5.0",
-      "com.github.vovapolu"  %% "scaluzzi"         % "0.1.20"
-    ),
-    Test / parallelExecution := true,
-    incOptions ~= (_.withLogRecompileOnMacro(false)),
-    autoAPIMappings := true,
-    unusedCompileDependenciesFilter -= moduleFilter("org.scala-js", "scalajs-library"),
-    Compile / unmanagedSourceDirectories ++= {
-      CrossVersion.partialVersion(scalaVersion.value) match {
-        case Some((2, x)) if x <= 11 =>
-          Seq(
-            Seq(file(sourceDirectory.value.getPath + "/main/scala-2.11")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.11")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.11")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.x")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.11-2.12"))
-          ).flatten
-        case Some((2, x)) if x == 12 =>
-          Seq(
-            Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12")),
-            Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.x")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12-2.13")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.11-2.12"))
-          ).flatten
-        case Some((2, x)) if x >= 13 =>
-          Seq(
-            Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12")),
-            Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.x")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12-2.13")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.13+"))
-          ).flatten
-        case Some((3, _)) =>
-          Seq(
-            Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12")),
-            Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-dotty")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.13+"))
-          ).flatten
-        case _ =>
-          Nil
+  def stdSettings(prjName: String) =
+    Seq(
+      name                                   := s"$prjName",
+      crossScalaVersions                     := Seq(Scala211, Scala212, Scala213),
+      ThisBuild / scalaVersion               := Scala213,
+      scalacOptions                          := stdOptions ++ extraOptions(scalaVersion.value, optimize = !isSnapshot.value),
+      semanticdbEnabled                      := !(scalaVersion.value == ScalaDotty), // enable SemanticDB
+      semanticdbVersion                      := scalafixSemanticdb.revision,         // use Scalafix compatible version
+      ThisBuild / scalafixScalaBinaryVersion := CrossVersion.binaryScalaVersion(scalaVersion.value),
+      ThisBuild / scalafixDependencies ++= List(
+        "com.github.liancheng" %% "organize-imports" % "0.5.0",
+        "com.github.vovapolu"  %% "scaluzzi"         % "0.1.20"
+      ),
+      Test / parallelExecution := true,
+      incOptions ~= (_.withLogRecompileOnMacro(false)),
+      autoAPIMappings := true,
+      unusedCompileDependenciesFilter -= moduleFilter("org.scala-js", "scalajs-library"),
+      Compile / unmanagedSourceDirectories ++= {
+        CrossVersion.partialVersion(scalaVersion.value) match {
+          case Some((2, x)) if x <= 11 =>
+            Seq(
+              Seq(file(sourceDirectory.value.getPath + "/main/scala-2.11")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.11")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.11")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.x")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.11-2.12"))
+            ).flatten
+          case Some((2, x)) if x == 12 =>
+            Seq(
+              Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12")),
+              Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.x")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12-2.13")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.11-2.12"))
+            ).flatten
+          case Some((2, x)) if x >= 13 =>
+            Seq(
+              Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12")),
+              Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.x")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12-2.13")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.13+"))
+            ).flatten
+          case Some((3, _)) =>
+            Seq(
+              Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12")),
+              Seq(file(sourceDirectory.value.getPath + "/main/scala-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-dotty")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.13+"))
+            ).flatten
+          case _ =>
+            Nil
+        }
+      },
+      Test / unmanagedSourceDirectories ++= {
+        CrossVersion.partialVersion(scalaVersion.value) match {
+          case Some((2, x)) if x <= 11 =>
+            Seq(
+              Seq(file(sourceDirectory.value.getPath + "/test/scala-2.11")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.x"))
+            ).flatten
+          case Some((2, x)) if x >= 12 =>
+            Seq(
+              Seq(file(sourceDirectory.value.getPath + "/test/scala-2.12")),
+              Seq(file(sourceDirectory.value.getPath + "/test/scala-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.x"))
+            ).flatten
+          case Some((3, _)) =>
+            Seq(
+              Seq(file(sourceDirectory.value.getPath + "/test/scala-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12+")),
+              CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-dotty"))
+            ).flatten
+          case _ =>
+            Nil
+        },
+      },
+      semanticdbOptions ++= {
+        CrossVersion.partialVersion(scalaVersion.value) match {
+          case Some((2, _)) =>
+            Seq(
+              "-P:semanticdb:synthetics:on"
+            )
+          case _ =>
+            Seq.empty
+        }
       }
-    },
-    Test / unmanagedSourceDirectories ++= {
-      CrossVersion.partialVersion(scalaVersion.value) match {
-        case Some((2, x)) if x <= 11 =>
-          Seq(
-            Seq(file(sourceDirectory.value.getPath + "/test/scala-2.11")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.x"))
-          ).flatten
-        case Some((2, x)) if x >= 12 =>
-          Seq(
-            Seq(file(sourceDirectory.value.getPath + "/test/scala-2.12")),
-            Seq(file(sourceDirectory.value.getPath + "/test/scala-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.x"))
-          ).flatten
-        case Some((3, _)) =>
-          Seq(
-            Seq(file(sourceDirectory.value.getPath + "/test/scala-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-dotty"))
-          ).flatten
-        case _ =>
-          Nil
-      }
-
-    }
-  )
+    )
 
   implicit class ModuleHelper(p: Project) {
     def module: Project = p.in(file(p.id)).settings(stdSettings(p.id))

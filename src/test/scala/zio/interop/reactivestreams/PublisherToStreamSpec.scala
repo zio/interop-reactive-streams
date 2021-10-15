@@ -1,28 +1,37 @@
 package zio.interop.reactivestreams
 
-import org.reactivestreams.{ Publisher, Subscriber, Subscription }
+import org.reactivestreams.Publisher
+import org.reactivestreams.Subscriber
+import org.reactivestreams.Subscription
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualPublisher
-import zio.{ Chunk, Exit, Promise, Task, UIO, ZIO }
-import zio.duration._
-import zio.stream.{ Sink, Stream }
-import zio.test._
+import zio.Chunk
+import zio.Exit
+import zio.Promise
+import zio.Supervisor
+import zio.Task
+import zio.UIO
+import zio.ZIO
+import zio.durationInt
+import zio.stream.Sink
+import zio.stream.Stream
 import zio.test.Assertion._
+import zio.test._
 
 object PublisherToStreamSpec extends DefaultRunnableSpec {
 
   override def spec =
     suite("Converting a `Publisher` to a `Stream`")(
-      testM("works with a well behaved `Publisher`") {
+      test("works with a well behaved `Publisher`") {
         assertM(publish(seq, None))(succeeds(equalTo(seq)))
       },
-      testM("fails with an initially failed `Publisher`") {
+      test("fails with an initially failed `Publisher`") {
         assertM(publish(Chunk.empty, Some(e)))(fails(equalTo(e)))
       },
-      testM("fails with an eventually failing `Publisher`") {
+      test("fails with an eventually failing `Publisher`") {
         assertM(publish(seq, Some(e)))(fails(equalTo(e)))
       },
-      testM("does not fail a fiber on failing `Publisher`") {
+      test("does not fail a fiber on failing `Publisher`") {
         val publisher = new Publisher[Int] {
           override def subscribe(s: Subscriber[_ >: Int]): Unit =
             s.onSubscribe(
@@ -32,18 +41,20 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
               }
             )
         }
-        ZIO.runtime[Any].map { runtime =>
-          var fibersFailed = 0
-          val testRuntime  = runtime.mapPlatform(_.withReportFailure(e => if (!e.interruptedOnly) fibersFailed += 1))
-          val exit         = testRuntime.unsafeRun(publisher.toStream().runDrain.run)
-          assert(exit)(fails(anything)) && assert(fibersFailed)(equalTo(0))
-        }
+        val supervisor = Supervisor.runtimeStats
+        for {
+          runtime    <- ZIO.runtime[Any]
+          testRuntime = runtime.mapRuntimeConfig(_.copy(supervisor = supervisor))
+          exit        = testRuntime.unsafeRun(publisher.toStream().runDrain.exit)
+          stats      <- supervisor.value
+        } yield assert(exit)(fails(anything)) &&
+          assert(stats.failures)(equalTo(0L))
       },
-      testM("does not freeze on stream end") {
+      test("does not freeze on stream end") {
         withProbe(probe =>
           for {
             fiber <- Stream
-                       .fromEffect(
+                       .fromZIO(
                          UIO(
                            probe.toStream()
                          )
@@ -51,14 +62,14 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
                        .flatMap(identity)
                        .run(Sink.collectAll[Int])
                        .fork
-            _ <- Task(probe.expectRequest())
+            _ <- Task.attemptBlockingInterrupt(probe.expectRequest())
             _ <- UIO(probe.sendNext(1))
             _ <- UIO(probe.sendCompletion)
             r <- fiber.join
           } yield assert(r)(equalTo(Chunk(1)))
         )
       } @@ TestAspect.timeout(1000.millis),
-      testM("cancels subscription when interrupted before subscription") {
+      test("cancels subscription when interrupted before subscription") {
         val tst =
           for {
             subscriberP    <- Promise.make[Nothing, Subscriber[_]]
@@ -78,55 +89,55 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
             _          <- UIO(subscriber.onSubscribe(subscription))
             _          <- cancelledLatch.await
           } yield ()
-        assertM(tst.run)(succeeds(anything))
+        assertM(tst.exit)(succeeds(anything))
       } @@ TestAspect.timeout(3.seconds),
-      testM("cancels subscription when interrupted after subscription") {
+      test("cancels subscription when interrupted after subscription") {
         withProbe(probe =>
           assertM((for {
             fiber <- probe.toStream(bufferSize).run(Sink.drain).fork
-            _     <- Task(probe.expectRequest())
+            _     <- Task.attemptBlockingInterrupt(probe.expectRequest())
             _     <- fiber.interrupt
-            _     <- Task(probe.expectCancelling())
-          } yield ()).run)(
+            _     <- Task.attemptBlockingInterrupt(probe.expectCancelling())
+          } yield ()).exit)(
             succeeds(isUnit)
           )
         )
       },
-      testM("cancels subscription when interrupted during consumption") {
+      test("cancels subscription when interrupted during consumption") {
         withProbe(probe =>
           assertM((for {
             fiber  <- probe.toStream(bufferSize).run(Sink.drain).fork
-            demand <- Task(probe.expectRequest())
+            demand <- Task.attemptBlockingInterrupt(probe.expectRequest())
             _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
             _      <- fiber.interrupt
-            _      <- Task(probe.expectCancelling())
-          } yield ()).run)(
+            _      <- Task.attemptBlockingInterrupt(probe.expectCancelling())
+          } yield ()).exit)(
             succeeds(isUnit)
           )
         )
       },
-      testM("cancels subscription on stream end") {
+      test("cancels subscription on stream end") {
         withProbe(probe =>
           assertM((for {
             fiber  <- probe.toStream(bufferSize).take(1).run(Sink.drain).fork
-            demand <- Task(probe.expectRequest())
+            demand <- Task.attemptBlockingInterrupt(probe.expectRequest())
             _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
-            _      <- Task(probe.expectCancelling())
+            _      <- Task.attemptBlockingInterrupt(probe.expectCancelling())
             _      <- fiber.join
-          } yield ()).run)(
+          } yield ()).exit)(
             succeeds(isUnit)
           )
         )
       },
-      testM("cancels subscription on stream error") {
+      test("cancels subscription on stream error") {
         withProbe(probe =>
           assertM((for {
-            fiber  <- probe.toStream(bufferSize).mapM(_ => Task.fail(new Throwable("boom!"))).run(Sink.drain).fork
-            demand <- Task(probe.expectRequest())
+            fiber  <- probe.toStream(bufferSize).mapZIO(_ => Task.fail(new Throwable("boom!"))).run(Sink.drain).fork
+            demand <- Task.attemptBlockingInterrupt(probe.expectRequest())
             _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
-            _      <- Task(probe.expectCancelling())
+            _      <- Task.attemptBlockingInterrupt(probe.expectCancelling())
             _      <- fiber.join
-          } yield ()).run)(
+          } yield ()).exit)(
             fails(anything)
           )
         )
@@ -147,12 +158,13 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
 
     def loop(probe: ManualPublisher[Int], remaining: Chunk[Int]): Task[Unit] =
       for {
-        n            <- Task(probe.expectRequest())
+        n            <- Task.attemptBlockingInterrupt(probe.expectRequest())
         _            <- Task(assert(n.toInt)(isLessThanEqualTo(bufferSize)))
         split         = n.toInt
         (nextN, tail) = remaining.splitAt(split)
         _            <- Task(nextN.foreach(probe.sendNext))
-        _ <- if (nextN.size < split) Task(failure.fold(probe.sendCompletion())(probe.sendError))
+        _ <- if (nextN.size < split)
+               Task(failure.fold(probe.sendCompletion())(probe.sendError))
              else loop(probe, tail)
       } yield ()
 
@@ -165,7 +177,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
         } yield r
       )
 
-    faillable.run
+    faillable.exit
   }
 
 }

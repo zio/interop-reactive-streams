@@ -2,48 +2,47 @@ package zio.interop.reactivestreams
 
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualSubscriberWithSubscriptionSupport
-import scala.jdk.CollectionConverters._
-import zio.{ Task, UIO, ZIO }
-import zio.blocking._
+import zio.IO
+import zio.Task
+import zio.UIO
 import zio.stream.Stream
-import zio.test._
 import zio.test.Assertion._
+import zio.test._
+
+import scala.jdk.CollectionConverters._
 
 object SubscriberToSinkSpec extends DefaultRunnableSpec {
   override def spec =
     suite("Converting a `Subscriber` to a `Sink`")(
-      testM("works on the happy path") {
-        val probeErrorSink =
-          for {
-            probe     <- makeSubscriber.toManaged_
-            errorSink <- probe.underlying.toSink[Throwable]
-          } yield (probe, errorSink)
-        probeErrorSink.use { case (probe, (_, sink)) =>
-          for {
-            fiber      <- Stream.fromIterable(seq).run(sink).fork
-            _          <- probe.request(length + 1)
-            elements   <- probe.nextElements(length).run
-            completion <- probe.expectCompletion.run
-            _          <- fiber.join
-          } yield assert(elements)(succeeds(equalTo(seq))) && assert(completion)(succeeds(isUnit))
-        }
+      test("works on the happy path") {
+        makeSubscriber.flatMap(probe =>
+          probe.underlying
+            .toSink[Throwable]
+            .use { case (_, sink) =>
+              for {
+                fiber      <- Stream.fromIterable(seq).run(sink).fork
+                _          <- probe.request(length + 1)
+                elements   <- probe.nextElements(length).exit
+                completion <- probe.expectCompletion.exit
+                _          <- fiber.join
+              } yield assert(elements)(succeeds(equalTo(seq))) && assert(completion)(succeeds(isUnit))
+            }
+        )
       },
-      testM("transports errors") {
-        val probeErrorSink =
-          for {
-            probe     <- makeSubscriber.toManaged_
-            errorSink <- probe.underlying.toSink[Throwable]
-          } yield (probe, errorSink)
-        probeErrorSink.use { case (probe, (error, sink)) =>
-          for {
-            fiber <- (Stream.fromIterable(seq) ++
-                       Stream.fail(e)).run(sink).catchAll(t => error.fail(t)).fork
-            _        <- probe.request(length + 1)
-            elements <- probe.nextElements(length).run
-            err      <- probe.expectError.run
-            _        <- fiber.join
-          } yield assert(elements)(succeeds(equalTo(seq))) && assert(err)(succeeds(equalTo(e)))
-        }
+      test("transports errors") {
+        makeSubscriber.flatMap(probe =>
+          probe.underlying
+            .toSink[Throwable]
+            .use { case (error, sink) =>
+              for {
+                fiber    <- (Stream.fromIterable(seq) ++ Stream.fail(e)).run(sink).catchAll(t => error.fail(t)).fork
+                _        <- probe.request(length + 1)
+                elements <- probe.nextElements(length).exit
+                err      <- probe.expectError.exit
+                _        <- fiber.join
+              } yield assert(elements)(succeeds(equalTo(seq))) && assert(err)(succeeds(equalTo(e)))
+            }
+        )
       }
     )
 
@@ -54,12 +53,12 @@ object SubscriberToSinkSpec extends DefaultRunnableSpec {
   case class Probe[T](underlying: ManualSubscriberWithSubscriptionSupport[T]) {
     def request(n: Long): UIO[Unit] =
       UIO(underlying.request(n))
-    def nextElements(n: Long): ZIO[Blocking, Throwable, List[T]] =
-      blocking(Task(underlying.nextElements(n.toLong).asScala.toList))
-    def expectError: ZIO[Blocking, Throwable, Throwable] =
-      blocking(Task(underlying.expectError(classOf[Throwable])))
-    def expectCompletion: ZIO[Blocking, Throwable, Unit] =
-      blocking(Task(underlying.expectCompletion()))
+    def nextElements(n: Long): IO[Throwable, List[T]] =
+      Task.attemptBlockingInterrupt(underlying.nextElements(n.toLong).asScala.toList)
+    def expectError: IO[Throwable, Throwable] =
+      Task.attemptBlockingInterrupt(underlying.expectError(classOf[Throwable]))
+    def expectCompletion: IO[Throwable, Unit] =
+      Task.attemptBlockingInterrupt(underlying.expectCompletion())
   }
 
   val makeSubscriber = UIO(new ManualSubscriberWithSubscriptionSupport[Int](new TestEnvironment(2000))).map(Probe.apply)

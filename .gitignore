@@ -3,6 +3,7 @@
 .metals
 .sbtopts
 .vscode
+.lh
 metals.sbt
 project/.sbt
 project/metals.sbt
