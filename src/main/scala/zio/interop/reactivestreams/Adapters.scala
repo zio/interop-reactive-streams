@@ -32,14 +32,14 @@ object Adapters {
 
   def subscriberToSink[E <: Throwable, I](
     subscriber: Subscriber[I]
-  ): UIO[(Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
+  ): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
     for {
-      runtime     <- ZIO.runtime[Any]
-      demand      <- Queue.unbounded[Long]
-      error       <- Promise.make[E, Nothing]
+      runtime     <- ZIO.runtime[Any].toManaged
+      demand      <- Queue.unbounded[Long].toManaged
+      error       <- Promise.make[E, Nothing].toManaged
       subscription = createSubscription(subscriber, demand, runtime)
-      _           <- UIO(subscriber.onSubscribe(subscription))
-      _           <- error.await.catchAll(t => UIO(subscriber.onError(t)) *> demand.shutdown).forkDaemon
+      _           <- UIO(subscriber.onSubscribe(subscription)).toManaged
+      _           <- error.await.catchAll(t => UIO(subscriber.onError(t)) *> demand.shutdown).toManaged.fork
     } yield (error, demandUnfoldSink(subscriber, demand))
 
   def publisherToStream[O](publisher: Publisher[O], bufferSize: Int): ZStream[Any, Throwable, O] = {

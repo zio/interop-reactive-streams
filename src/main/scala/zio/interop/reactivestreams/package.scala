@@ -1,8 +1,13 @@
 package zio.interop
 
-import org.reactivestreams.{ Publisher, Subscriber }
-import zio.stream.{ ZSink, ZStream }
-import zio.{ IO, Promise, UIO, ZIO, ZManaged }
+import org.reactivestreams.Publisher
+import org.reactivestreams.Subscriber
+import zio.IO
+import zio.Promise
+import zio.ZIO
+import zio.ZManaged
+import zio.stream.ZSink
+import zio.stream.ZStream
 
 package object reactivestreams {
 
@@ -46,14 +51,12 @@ package object reactivestreams {
       * ```
       * val subscriber: Subscriber[Int] = ???
       * val stream: Stream[Any, Throwable, Int] = ???
-      * for {
-      *   sinkError <- subscriberToSink(subscriber)
-      *   (error, sink) = sinkError
-      *   _ <- stream.run(sink).catchAll(e => error.fail(e)).fork
-      * } yield ()
+      * subscriber.toSink.use { case (error, sink) =>
+      *   stream.run(sink).catchAll(e => error.fail(e))
+      * }
       * ```
       */
-    def toSink[E <: Throwable]: UIO[(Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
+    def toSink[E <: Throwable]: ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
   }
 

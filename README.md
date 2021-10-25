@@ -60,7 +60,7 @@ on `Stream` failure. The type parameter on `toSink` is the error type of *the St
 val asSink = subscriber.toSink[Throwable]
 val failingStream = Stream.range(3, 13) ++ Stream.fail(new RuntimeException("boom!"))
 runtime.unsafeRun(
-  asSink.flatMap { case (errorP, sink) =>
+  asSink.use { case (errorP, sink) =>
     failingStream.run(sink).catchAll(errorP.fail)
   }
 )

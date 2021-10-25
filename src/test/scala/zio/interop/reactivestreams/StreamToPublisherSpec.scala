@@ -1,15 +1,17 @@
 package zio.interop.reactivestreams
 
-import java.lang.reflect.InvocationTargetException
 import org.reactivestreams.Publisher
-import org.reactivestreams.tck.{ PublisherVerification, TestEnvironment }
+import org.reactivestreams.tck.PublisherVerification
+import org.reactivestreams.tck.TestEnvironment
 import org.testng.annotations.Test
 import zio.Task
 import zio.UIO
 import zio.ZIO
 import zio.stream.Stream
-import zio.test._
 import zio.test.Assertion._
+import zio.test._
+
+import java.lang.reflect.InvocationTargetException
 
 object StreamToPublisherSpec extends DefaultRunnableSpec {
   override def spec =
