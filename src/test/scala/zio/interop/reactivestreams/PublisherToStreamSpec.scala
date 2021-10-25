@@ -74,14 +74,13 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           for {
             subscriberP    <- Promise.make[Nothing, Subscriber[_]]
             cancelledLatch <- Promise.make[Nothing, Unit]
-            runtime        <- ZIO.runtime[Any]
             subscription = new Subscription {
                              override def request(x$1: Long): Unit = ()
-                             override def cancel(): Unit           = runtime.unsafeRun(cancelledLatch.succeed(()).unit)
+                             override def cancel(): Unit           = cancelledLatch.unsafeDone(UIO.unit)
                            }
             probe = new Publisher[Int] {
                       override def subscribe(subscriber: Subscriber[_ >: Int]): Unit =
-                        runtime.unsafeRun(subscriberP.succeed(subscriber).unit)
+                        subscriberP.unsafeDone(UIO.succeedNow(subscriber))
                     }
             fiber      <- probe.toStream(bufferSize).run(Sink.drain).fork
             subscriber <- subscriberP.await

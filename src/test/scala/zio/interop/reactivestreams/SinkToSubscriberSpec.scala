@@ -49,42 +49,40 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
         } yield assert(r)(succeeds(equalTo(List(1, 2, 3, 4, 5))))
       ),
       test("cancels subscription on interruption after subscription")(
-        ZIO.blocking(
-          for {
-            (publisher, subscribed, _, canceled) <- makePublisherProbe
-            fiber <- Sink.drain
-                       .toSubscriber()
-                       .use { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
-                       .fork
-            _ <-
-              Live.live(
-                assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).exit)(succeeds(isUnit))
-              )
-            _ <- fiber.interrupt
-            _ <- Live.live(
-                   assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).exit)(succeeds(isUnit))
-                 )
-            r <- fiber.join.exit
-          } yield assert(r)(isInterrupted)
-        )
+        for {
+          (publisher, subscribed, _, canceled) <- makePublisherProbe
+          fiber <- Sink
+                     .foreachChunk[Any, Nothing, Int](_ => ZIO.yieldNow)
+                     .toSubscriber()
+                     .use { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
+                     .fork
+          _ <-
+            Live.live(
+              assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).exit)(succeeds(isUnit))
+            )
+          _ <- fiber.interrupt
+          _ <- Live.live(
+                 assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).exit)(succeeds(isUnit))
+               )
+          r <- fiber.join.exit
+        } yield assert(r)(isInterrupted)
       ),
       test("cancels subscription on interruption during consuption")(
-        ZIO.blocking(
-          for {
-            (publisher, subscribed, requested, canceled) <- makePublisherProbe
-            fiber <- Sink.drain
-                       .toSubscriber()
-                       .use { case (subscriber, _) =>
-                         Task.attemptBlockingInterrupt(publisher.subscribe(subscriber)) *> UIO.never
-                       }
-                       .fork
-            _ <- assertM(subscribed.await.exit)(succeeds(isUnit))
-            _ <- assertM(requested.await.exit)(succeeds(isUnit))
-            _ <- fiber.interrupt
-            _ <- assertM(canceled.await.exit)(succeeds(isUnit))
-            r <- fiber.join.exit
-          } yield assert(r)(isInterrupted)
-        )
+        for {
+          (publisher, subscribed, requested, canceled) <- makePublisherProbe
+          fiber <- Sink
+                     .foreachChunk[Any, Nothing, Int](_ => ZIO.yieldNow)
+                     .toSubscriber()
+                     .use { case (subscriber, _) =>
+                       Task.attemptBlockingInterrupt(publisher.subscribe(subscriber)) *> UIO.never
+                     }
+                     .fork
+          _ <- assertM(subscribed.await.exit)(succeeds(isUnit))
+          _ <- assertM(requested.await.exit)(succeeds(isUnit))
+          _ <- fiber.interrupt
+          _ <- assertM(canceled.await.exit)(succeeds(isUnit))
+          r <- fiber.join.exit
+        } yield assert(r)(isInterrupted)
       ),
       suite("passes all required and optional TCK tests")(
         tests: _*
@@ -93,7 +91,6 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
 
   val makePublisherProbe =
     for {
-      runtime    <- ZIO.runtime[Any]
       subscribed <- Promise.make[Nothing, Unit]
       requested  <- Promise.make[Nothing, Unit]
       canceled   <- Promise.make[Nothing, Unit]
@@ -102,14 +99,14 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
                       s.onSubscribe(
                         new Subscription {
                           override def request(n: Long): Unit = {
-                            runtime.unsafeRun(requested.succeed(()).unit)
+                            requested.unsafeDone(UIO.unit)
                             (1 to n.toInt).foreach(s.onNext(_))
                           }
                           override def cancel(): Unit =
-                            runtime.unsafeRun(canceled.succeed(()).unit)
+                            canceled.unsafeDone(UIO.unit)
                         }
                       )
-                      runtime.unsafeRun(subscribed.succeed(()).unit)
+                      subscribed.unsafeDone(UIO.unit)
                     }
                   }
     } yield (publisher, subscribed, requested, canceled)
