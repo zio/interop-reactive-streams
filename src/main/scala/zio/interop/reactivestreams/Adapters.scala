@@ -137,7 +137,7 @@ object Adapters {
           override def onSubscribe(s: Subscription): Unit =
             if (s == null) {
               val e = new NullPointerException("s was null in onSubscribe")
-              runtime.unsafeRun(p.fail(e))
+              p.unsafeDone(IO.fail(e))
               throw e
             } else {
               runtime.unsafeRun(
