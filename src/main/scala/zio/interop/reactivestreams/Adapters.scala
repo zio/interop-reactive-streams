@@ -12,7 +12,9 @@ import zio.stream.ZStream.Pull
 
 object Adapters {
 
-  def streamToPublisher[R, E <: Throwable, O](stream: => ZStream[R, E, O]): ZIO[R, Nothing, Publisher[O]] =
+  def streamToPublisher[R, E <: Throwable, O](
+    stream: => ZStream[R, E, O]
+  )(implicit trace: ZTraceElement): ZIO[R, Nothing, Publisher[O]] =
     ZIO.runtime.map { runtime => subscriber =>
       if (subscriber == null) {
         throw new NullPointerException("Subscriber must not be null.")
@@ -32,7 +34,7 @@ object Adapters {
 
   def subscriberToSink[E <: Throwable, I](
     subscriber: => Subscriber[I]
-  ): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] = {
+  )(implicit trace: ZTraceElement): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] = {
     val sub = subscriber
     for {
       runtime     <- ZIO.runtime[Any].toManaged
@@ -44,7 +46,9 @@ object Adapters {
     } yield (error, demandUnfoldSink(sub, demand))
   }
 
-  def publisherToStream[O](publisher: => Publisher[O], bufferSize: => Int): ZStream[Any, Throwable, O] = {
+  def publisherToStream[O](publisher: => Publisher[O], bufferSize: => Int)(implicit
+    trace: ZTraceElement
+  ): ZStream[Any, Throwable, O] = {
     val pullOrFail =
       for {
         subscriberP    <- makeSubscriber[O](bufferSize)
@@ -61,7 +65,7 @@ object Adapters {
   def sinkToSubscriber[R, I, L, Z](
     sink: => ZSink[R, Throwable, I, L, Z],
     bufferSize: => Int
-  ): ZManaged[R, Throwable, (Subscriber[I], IO[Throwable, Z])] =
+  )(implicit trace: ZTraceElement): ZManaged[R, Throwable, (Subscriber[I], IO[Throwable, Z])] =
     for {
       subscriberP    <- makeSubscriber[I](bufferSize)
       (subscriber, p) = subscriberP
@@ -73,7 +77,7 @@ object Adapters {
   private def process[R, A](
     q: Queue[Exit[Option[Throwable], A]],
     sub: Subscription
-  ): ZManaged[Any, Nothing, ZIO[Any, Option[Throwable], Chunk[A]]] = {
+  )(implicit trace: ZTraceElement): ZManaged[Any, Nothing, ZIO[Any, Option[Throwable], Chunk[A]]] = {
     val capacity = q.capacity.toLong - 1 // leave space for End or Fail
     for {
       _         <- ZManaged.succeed(sub.request(capacity))
@@ -120,6 +124,8 @@ object Adapters {
 
   private def makeSubscriber[A](
     capacity: Int
+  )(implicit
+    trace: ZTraceElement
   ): UManaged[(Subscriber[A], Promise[Throwable, (Subscription, Queue[Exit[Option[Throwable], A]])])] =
     for {
       q <- Queue

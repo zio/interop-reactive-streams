@@ -6,6 +6,7 @@ import zio.IO
 import zio.Promise
 import zio.ZIO
 import zio.ZManaged
+import zio.ZTraceElement
 import zio.stream.ZSink
 import zio.stream.ZStream
 
@@ -16,7 +17,7 @@ package object reactivestreams {
     /** Create a `Publisher` from a `Stream`. Every time the `Publisher` is subscribed to, a new instance of the
       * `Stream` is run.
       */
-    def toPublisher: ZIO[R, Nothing, Publisher[O]] =
+    def toPublisher(implicit trace: ZTraceElement): ZIO[R, Nothing, Publisher[O]] =
       Adapters.streamToPublisher(stream)
   }
 
@@ -30,7 +31,9 @@ package object reactivestreams {
       *   The size used as internal buffer. A maximum of `qSize-1` `A`s will be buffered, so `qSize` must be > 1. If
       *   possible, set to a power of 2 value for best performance.
       */
-    def toSubscriber(qSize: Int = 16): ZManaged[R, Throwable, (Subscriber[A], IO[Throwable, Z])] =
+    def toSubscriber(qSize: Int = 16)(implicit
+      trace: ZTraceElement
+    ): ZManaged[R, Throwable, (Subscriber[A], IO[Throwable, Z])] =
       Adapters.sinkToSubscriber(sink, qSize)
   }
 
@@ -40,7 +43,7 @@ package object reactivestreams {
       *   The size used as internal buffer. A maximum of `qSize-1` `A`s will be buffered, so `qSize` must be > 1. If
       *   possible, set to a power of 2 value for best performance.
       */
-    def toStream(qSize: Int = 16): ZStream[Any, Throwable, O] =
+    def toStream(qSize: Int = 16)(implicit trace: ZTraceElement): ZStream[Any, Throwable, O] =
       Adapters.publisherToStream(publisher, qSize)
   }
 
@@ -56,7 +59,9 @@ package object reactivestreams {
       * }
       * ```
       */
-    def toSink[E <: Throwable]: ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
+    def toSink[E <: Throwable](implicit
+      trace: ZTraceElement
+    ): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
   }
 
