@@ -63,3 +63,5 @@ lazy val interopReactiveStreams = project
         Seq("org.scala-lang.modules" %% "scala-collection-compat" % collCompatVersion % Test)
     }
   )
+  .settings(Test / javaOptions += "-XX:ActiveProcessorCount=1")
+  .settings(Test / fork := true)

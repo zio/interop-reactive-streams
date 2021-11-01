@@ -141,7 +141,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           )
         )
       }
-    )
+    ) @@ TestAspect.nonFlaky
 
   val e: Throwable    = new RuntimeException("boom")
   val seq: Chunk[Int] = Chunk.fromIterable(List.range(0, 100))
