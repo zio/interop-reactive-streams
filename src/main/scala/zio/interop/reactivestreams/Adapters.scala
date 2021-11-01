@@ -12,7 +12,7 @@ import zio.stream.ZStream.Pull
 
 object Adapters {
 
-  def streamToPublisher[R, E <: Throwable, O](stream: ZStream[R, E, O]): ZIO[R, Nothing, Publisher[O]] =
+  def streamToPublisher[R, E <: Throwable, O](stream: => ZStream[R, E, O]): ZIO[R, Nothing, Publisher[O]] =
     ZIO.runtime.map { runtime => subscriber =>
       if (subscriber == null) {
         throw new NullPointerException("Subscriber must not be null.")
@@ -31,18 +31,20 @@ object Adapters {
     }
 
   def subscriberToSink[E <: Throwable, I](
-    subscriber: Subscriber[I]
-  ): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
+    subscriber: => Subscriber[I]
+  ): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] = {
+    val sub = subscriber
     for {
       runtime     <- ZIO.runtime[Any].toManaged
       demand      <- Queue.unbounded[Long].toManaged
       error       <- Promise.make[E, Nothing].toManaged
-      subscription = createSubscription(subscriber, demand, runtime)
-      _           <- UIO(subscriber.onSubscribe(subscription)).toManaged
-      _           <- error.await.catchAll(t => UIO(subscriber.onError(t)) *> demand.shutdown).toManaged.fork
-    } yield (error, demandUnfoldSink(subscriber, demand))
+      subscription = createSubscription(sub, demand, runtime)
+      _           <- UIO(sub.onSubscribe(subscription)).toManaged
+      _           <- error.await.catchAll(t => UIO(sub.onError(t)) *> demand.shutdown).toManaged.fork
+    } yield (error, demandUnfoldSink(sub, demand))
+  }
 
-  def publisherToStream[O](publisher: Publisher[O], bufferSize: Int): ZStream[Any, Throwable, O] = {
+  def publisherToStream[O](publisher: => Publisher[O], bufferSize: => Int): ZStream[Any, Throwable, O] = {
     val pullOrFail =
       for {
         subscriberP    <- makeSubscriber[O](bufferSize)
@@ -57,8 +59,8 @@ object Adapters {
   }
 
   def sinkToSubscriber[R, I, L, Z](
-    sink: ZSink[R, Throwable, I, L, Z],
-    bufferSize: Int
+    sink: => ZSink[R, Throwable, I, L, Z],
+    bufferSize: => Int
   ): ZManaged[R, Throwable, (Subscriber[I], IO[Throwable, Z])] =
     for {
       subscriberP    <- makeSubscriber[I](bufferSize)
@@ -174,7 +176,7 @@ object Adapters {
       (subscriber, p)
     }
 
-  def demandUnfoldSink[I](
+  private def demandUnfoldSink[I](
     subscriber: Subscriber[_ >: I],
     demand: Queue[Long]
   ): ZSink[Any, Nothing, I, I, Unit] =
@@ -198,7 +200,7 @@ object Adapters {
       }
       .mapZIO(_ => demand.isShutdown.flatMap(is => UIO(subscriber.onComplete()).when(!is).unit))
 
-  def createSubscription[A](
+  private def createSubscription[A](
     subscriber: Subscriber[_ >: A],
     demand: Queue[Long],
     runtime: Runtime[_]
