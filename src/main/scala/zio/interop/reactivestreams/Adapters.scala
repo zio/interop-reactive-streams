@@ -47,9 +47,10 @@ object Adapters {
     } yield (error, demandUnfoldSink(sub, demand))
   }
 
-  def publisherToStream[O](publisher: => Publisher[O], bufferSize: => Int)(implicit
-    trace: ZTraceElement
-  ): ZStream[Any, Throwable, O] = {
+  def publisherToStream[O](
+    publisher: => Publisher[O],
+    bufferSize: => Int
+  )(implicit trace: ZTraceElement): ZStream[Any, Throwable, O] = {
     val pullOrFail =
       for {
         subscriberP    <- makeSubscriber[O](bufferSize)
