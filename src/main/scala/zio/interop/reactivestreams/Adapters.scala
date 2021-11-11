@@ -55,8 +55,9 @@ object Adapters {
       for {
         subscriberP    <- makeSubscriber[O](bufferSize)
         (subscriber, p) = subscriberP
+        _              <- ZManaged.finalizer(UIO(subscriber.interrupt()))
         _              <- ZManaged.succeed(publisher.subscribe(subscriber))
-        subQ           <- p.await.onInterrupt(UIO(subscriber.interrupt())).interruptible.toManaged
+        subQ           <- p.await.toManaged
         (sub, q)        = subQ
         process        <- process(sub, q, () => subscriber.await(), () => subscriber.isDone)
       } yield process
@@ -147,19 +148,16 @@ object Adapters {
               case None =>
                 val p = Promise.unsafeMake[Option[Throwable], Unit](FiberId.None)
                 toNotify = Some(p)
-                done match {
-                  case None if q.isEmpty() =>
-                    // We still need to wait.
-                    p.await
-                  case None =>
-                    // An element has arrived in the meantime, we do not need to start waiting.
+                // An element has arrived in the meantime, we do not need to start waiting.
+                if (!q.isEmpty()) {
+                  toNotify = None
+                  IO.unit
+                } else
+                  done.fold(p.await) { e =>
+                    // The producer has canceled or errored in the meantime.
                     toNotify = None
-                    IO.unit
-                  case Some(value) =>
-                    // The producer has canceled or errored in the meantime, we do not need to start waiting.
-                    toNotify = None
-                    IO.fail(value)
-                }
+                    IO.fail(e)
+                  }
             }
 
           override def isDone: Boolean = done.isDefined
