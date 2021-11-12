@@ -59,11 +59,9 @@ object StreamToPublisherSpec extends DefaultRunnableSpec {
               r <- Task
                      .attemptBlockingInterrupt(method.invoke(pv))
                      .unit
-                     .refineOrDie { case e: InvocationTargetException =>
-                       e.getTargetException()
-                     }
+                     .refineOrDie { case e: InvocationTargetException => e.getTargetException() }
                      .exit
             } yield assert(r)(succeeds(isUnit))
-          )
+          ) @@ TestAspect.nonFlaky(5)
       }
 }

@@ -44,7 +44,7 @@ object SubscriberToSinkSpec extends DefaultRunnableSpec {
             }
         )
       }
-    )
+    ) // @@ TestAspect.nonFlaky // FIXME: potential deadlock?
 
   val seq: List[Int] = List.range(0, 31)
   val length: Long   = seq.length.toLong

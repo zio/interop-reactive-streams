@@ -10,6 +10,8 @@ import zio.stream.ZStream
 import zio.stream.ZStream.Pull
 
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import scala.util.control.NonFatal
 
 object Adapters {
 
@@ -20,12 +22,12 @@ object Adapters {
       if (subscriber == null) {
         throw new NullPointerException("Subscriber must not be null.")
       } else {
+        val subscription = new DemandTrackingSubscription(subscriber)
         runtime.unsafeRunAsync(
           for {
-            demand <- Queue.unbounded[Long]
-            _      <- UIO(subscriber.onSubscribe(createSubscription(subscriber, demand, runtime)))
+            _ <- UIO(subscriber.onSubscribe(subscription))
             _ <- stream
-                   .run(demandUnfoldSink(subscriber, demand))
+                   .run(demandUnfoldSink(subscriber, subscription))
                    .catchAll(e => UIO(subscriber.onError(e)))
                    .forkDaemon
           } yield ()
@@ -38,13 +40,11 @@ object Adapters {
   )(implicit trace: ZTraceElement): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] = {
     val sub = subscriber
     for {
-      runtime     <- ZIO.runtime[Any].toManaged
-      demand      <- Queue.unbounded[Long].toManaged
       error       <- Promise.make[E, Nothing].toManaged
-      subscription = createSubscription(sub, demand, runtime)
+      subscription = new DemandTrackingSubscription(sub)
       _           <- UIO(sub.onSubscribe(subscription)).toManaged
-      _           <- error.await.catchAll(t => UIO(sub.onError(t)) *> demand.shutdown).toManaged.fork
-    } yield (error, demandUnfoldSink(sub, demand))
+      _           <- error.await.catchAll(t => UIO(sub.onError(t))).toManaged.fork
+    } yield (error, demandUnfoldSink(sub, subscription))
   }
 
   def publisherToStream[O](
@@ -211,39 +211,80 @@ object Adapters {
     }
 
   private def demandUnfoldSink[I](
-    subscriber: Subscriber[_ >: I],
-    demand: Queue[Long]
+    subscriber: Subscriber[I],
+    subscription: DemandTrackingSubscription
   ): ZSink[Any, Nothing, I, I, Unit] =
     ZSink
       .foldChunksZIO[Any, Nothing, I, Long](0L)(_ >= 0L) { (bufferedDemand, chunk) =>
         UIO
           .iterate((chunk, bufferedDemand))(!_._1.isEmpty) { case (chunk, bufferedDemand) =>
-            demand.isShutdown.flatMap {
-              case true => UIO((Chunk.empty, -1))
-              case false =>
-                if (chunk.size.toLong <= bufferedDemand)
-                  UIO
-                    .foreach(chunk)(a => UIO(subscriber.onNext(a)))
-                    .as((Chunk.empty, bufferedDemand - chunk.size.toLong))
-                else
-                  UIO.foreach(chunk.take(bufferedDemand.toInt))(a => UIO(subscriber.onNext(a))) *>
-                    demand.take.map((chunk.drop(bufferedDemand.toInt), _))
-            }
+            if (subscription.canceled) UIO.succeedNow((Chunk.empty, -1))
+            else if (chunk.size.toLong <= bufferedDemand)
+              UIO
+                .foreach(chunk)(a => UIO(subscriber.onNext(a)))
+                .as((Chunk.empty, bufferedDemand - chunk.size.toLong))
+            else
+              UIO.foreach(chunk.take(bufferedDemand.toInt))(a => UIO(subscriber.onNext(a))) *>
+                subscription.requested.fold(_ => (Chunk.empty, -1L), (chunk.drop(bufferedDemand.toInt), _))
           }
           .map(_._2)
       }
-      .mapZIO(_ => demand.isShutdown.flatMap(is => UIO(subscriber.onComplete()).when(!is).unit))
+      .map(_ => if (!subscription.canceled) subscriber.onComplete())
 
-  private def createSubscription[A](
-    subscriber: Subscriber[_ >: A],
-    demand: Queue[Long],
-    runtime: Runtime[_]
-  ): Subscription =
-    new Subscription {
-      override def request(n: Long): Unit = {
-        if (n <= 0) subscriber.onError(new IllegalArgumentException("non-positive subscription request"))
-        runtime.unsafeRunAsync(demand.offer(n))
+  private class DemandTrackingSubscription(subscriber: Subscriber[_]) extends Subscription {
+
+    // < 0 when cancelled
+    private val requestedCount = new AtomicLong(0L)
+    @volatile
+    private var toNotify: Option[Promise[Unit, Long]] = None
+
+    def requested: IO[Unit, Long] = {
+      val got = requestedCount.getAndUpdate(old => if (old >= 0L) 0L else old)
+      if (got < 0L) {
+        IO.fail(())
+      } else if (got > 0L) {
+        IO.succeedNow(got)
+      } else {
+        val p = Promise.unsafeMake[Unit, Long](FiberId.None)
+        toNotify = Some(p)
+        val got = requestedCount.getAndUpdate(old => if (old >= 0L) 0L else old)
+        if (got != 0L) {
+          toNotify = None
+          if (got < 0L)
+            IO.fail(())
+          else
+            IO.succeedNow(got)
+        } else {
+          p.await
+        }
       }
-      override def cancel(): Unit = runtime.unsafeRun(demand.shutdown)
     }
+
+    def canceled: Boolean = requestedCount.get() < 0L
+
+    override def request(n: Long): Unit = {
+      if (n <= 0) subscriber.onError(new IllegalArgumentException("non-positive subscription request"))
+      requestedCount.getAndUpdate { old =>
+        if (old >= 0L)
+          toNotify match {
+            case Some(p) =>
+              p.unsafeDone(IO.succeedNow(n))
+              toNotify = None
+              old
+            case None =>
+              try {
+                Math.addExact(old, n)
+              } catch { case NonFatal(_) => Long.MaxValue }
+          }
+        else
+          old
+      }
+      ()
+    }
+
+    override def cancel(): Unit = {
+      requestedCount.set(-1L)
+      toNotify.foreach(_.unsafeDone(IO.fail(())))
+    }
+  }
 }
