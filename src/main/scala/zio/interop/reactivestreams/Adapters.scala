@@ -232,12 +232,12 @@ object Adapters {
 
   private class DemandTrackingSubscription(subscriber: Subscriber[_]) extends Subscription {
 
-    case class State(
+    private case class State(
       requestedCount: Long, // -1 when cancelled
       toNotify: Option[(Int, Promise[Unit, Int])]
     )
 
-    object State {
+    private object State {
       val initial                                 = State(0L, None)
       val canceled                                = State(-1, None)
       def requested(n: Long)                      = State(n, None)
