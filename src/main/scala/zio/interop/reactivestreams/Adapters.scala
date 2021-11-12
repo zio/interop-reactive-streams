@@ -215,19 +215,14 @@ object Adapters {
     subscription: DemandTrackingSubscription
   ): ZSink[Any, Nothing, I, I, Unit] =
     ZSink
-      .foldChunksZIO[Any, Nothing, I, Long](0L)(_ >= 0L) { (bufferedDemand, chunk) =>
-        UIO
-          .iterate((chunk, bufferedDemand))(!_._1.isEmpty) { case (chunk, bufferedDemand) =>
-            if (subscription.canceled) UIO.succeedNow((Chunk.empty, -1))
-            else if (chunk.size.toLong <= bufferedDemand)
-              UIO
-                .foreach(chunk)(a => UIO(subscriber.onNext(a)))
-                .as((Chunk.empty, bufferedDemand - chunk.size.toLong))
-            else
-              UIO.foreach(chunk.take(bufferedDemand.toInt))(a => UIO(subscriber.onNext(a))) *>
-                subscription.requested.fold(_ => (Chunk.empty, -1L), (chunk.drop(bufferedDemand.toInt), _))
+      .foldChunksZIO[Any, Nothing, I, Boolean](true)(identity) { (_, chunk) =>
+        IO
+          .iterate(chunk)(!_.isEmpty) { chunk =>
+            subscription
+              .offer(chunk.size)
+              .flatMap(next => UIO.foreach(chunk.take(next))(a => UIO(subscriber.onNext(a))).as(chunk.drop(next)))
           }
-          .map(_._2)
+          .fold(_ => false, _ => true)
       }
       .map(_ => if (!subscription.canceled) subscriber.onComplete())
 
@@ -236,21 +231,23 @@ object Adapters {
     // < 0 when cancelled
     private val requestedCount = new AtomicLong(0L)
     @volatile
-    private var toNotify: Option[Promise[Unit, Long]] = None
+    private var toNotify: Option[(Int, Promise[Unit, Int])] = None
 
-    def requested: IO[Unit, Long] = {
-      val got = requestedCount.getAndUpdate(old => if (old >= 0L) 0L else old)
-      if (got < 0L) {
+    def offer(n: Int): IO[Unit, Int] = {
+      val old = requestedCount.getAndUpdate(old => if (old >= 0L) Math.max(old - n, 0L) else old)
+      val got = Math.min(old, n.toLong).toInt
+      if (got < 0) {
         IO.fail(())
-      } else if (got > 0L) {
+      } else if (got > 0) {
         IO.succeedNow(got)
       } else {
-        val p = Promise.unsafeMake[Unit, Long](FiberId.None)
-        toNotify = Some(p)
-        val got = requestedCount.getAndUpdate(old => if (old >= 0L) 0L else old)
-        if (got != 0L) {
+        val p = Promise.unsafeMake[Unit, Int](FiberId.None)
+        toNotify = Some((n, p))
+        val old = requestedCount.getAndUpdate(old => if (old >= 0L) Math.max(old - n, 0L) else old)
+        val got = Math.min(old, n.toLong).toInt
+        if (got != 0) {
           toNotify = None
-          if (got < 0L)
+          if (got < 0)
             IO.fail(())
           else
             IO.succeedNow(got)
@@ -267,10 +264,12 @@ object Adapters {
       requestedCount.getAndUpdate { old =>
         if (old >= 0L)
           toNotify match {
-            case Some(p) =>
-              p.unsafeDone(IO.succeedNow(n))
+            case Some((o, p)) =>
+              val toOffer   = Math.min(o.toLong, n)
+              val remaining = n - toOffer
+              p.unsafeDone(IO.succeedNow(toOffer.toInt))
               toNotify = None
-              old
+              remaining
             case None =>
               try {
                 Math.addExact(old, n)
@@ -284,7 +283,7 @@ object Adapters {
 
     override def cancel(): Unit = {
       requestedCount.set(-1L)
-      toNotify.foreach(_.unsafeDone(IO.fail(())))
+      toNotify.foreach(_._2.unsafeDone(IO.fail(())))
     }
   }
 }
