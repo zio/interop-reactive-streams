@@ -234,26 +234,21 @@ object Adapters {
     private var toNotify: Option[(Int, Promise[Unit, Int])] = None
 
     def offer(n: Int): IO[Unit, Int] = {
-      val old = requestedCount.getAndUpdate(old => if (old >= 0L) Math.max(old - n, 0L) else old)
-      val got = Math.min(old, n.toLong).toInt
-      if (got < 0) {
-        IO.fail(())
-      } else if (got > 0) {
-        IO.succeedNow(got)
-      } else {
-        val p = Promise.unsafeMake[Unit, Int](FiberId.None)
-        toNotify = Some((n, p))
+      def shortCircuitOr(f: => IO[Unit, Int]): IO[Unit, Int] = {
         val old = requestedCount.getAndUpdate(old => if (old >= 0L) Math.max(old - n, 0L) else old)
         val got = Math.min(old, n.toLong).toInt
-        if (got != 0) {
-          toNotify = None
-          if (got < 0)
-            IO.fail(())
-          else
-            IO.succeedNow(got)
+        if (got < 0) {
+          IO.fail(())
+        } else if (got > 0) {
+          IO.succeedNow(got)
         } else {
-          p.await
+          f
         }
+      }
+      shortCircuitOr {
+        val p = Promise.unsafeMake[Unit, Int](FiberId.None)
+        toNotify = Some((n, p))
+        shortCircuitOr(p.await)
       }
     }
 
@@ -284,6 +279,7 @@ object Adapters {
     override def cancel(): Unit = {
       requestedCount.set(-1L)
       toNotify.foreach(_._2.unsafeDone(IO.fail(())))
+      toNotify = None
     }
   }
 }
