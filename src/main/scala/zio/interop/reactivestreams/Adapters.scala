@@ -237,30 +237,28 @@ object Adapters {
       toNotify: Option[(Int, Promise[Unit, Int])]
     )
 
-    private object State {
-      val initial                                 = State(0L, None)
-      val canceled                                = State(-1, None)
-      def requested(n: Long)                      = State(n, None)
-      def awaiting(n: Int, p: Promise[Unit, Int]) = State(0L, Some((n, p)))
-    }
+    private val initial                                 = State(0L, None)
+    private val canceled                                = State(-1, None)
+    private def requested(n: Long)                      = State(n, None)
+    private def awaiting(n: Int, p: Promise[Unit, Int]) = State(0L, Some((n, p)))
 
-    private val state = new AtomicReference(State.initial)
+    private val state = new AtomicReference(initial)
 
     def offer(n: Int): IO[Unit, Int] = {
       var result: IO[Unit, Int] = null
       state.updateAndGet {
-        case State.canceled =>
+        case `canceled` =>
           result = IO.fail(())
-          State.canceled
+          canceled
         case State(0L, _) =>
           val p = Promise.unsafeMake[Unit, Int](FiberId.None)
           result = p.await
-          State.awaiting(n, p)
+          awaiting(n, p)
         case State(requestedCount, _) =>
           val newRequestedCount = Math.max(requestedCount - n, 0L)
           val accepted          = Math.min(requestedCount, n.toLong).toInt
           result = IO.succeedNow(accepted)
-          State.requested(newRequestedCount)
+          requested(newRequestedCount)
       }
       result
     }
@@ -270,23 +268,23 @@ object Adapters {
     override def request(n: Long): Unit = {
       if (n <= 0) subscriber.onError(new IllegalArgumentException("non-positive subscription request"))
       state.getAndUpdate {
-        case State.canceled =>
-          State.canceled
+        case `canceled` =>
+          canceled
         case State(requestedCount, Some((offered, toNotify))) =>
           val newRequestedCount = requestedCount + n
           val accepted          = Math.min(offered.toLong, newRequestedCount)
           val remaining         = newRequestedCount - accepted
           toNotify.unsafeDone(IO.succeedNow(accepted.toInt))
-          State.requested(remaining)
+          requested(remaining)
         case State(requestedCount, _) if ((Long.MaxValue - n) > requestedCount) =>
-          State.requested(requestedCount + n)
+          requested(requestedCount + n)
         case _ =>
-          State.requested(Long.MaxValue)
+          requested(Long.MaxValue)
       }
       ()
     }
 
     override def cancel(): Unit =
-      state.getAndSet(State.canceled).toNotify.foreach { case (_, p) => p.unsafeDone(IO.fail(())) }
+      state.getAndSet(canceled).toNotify.foreach { case (_, p) => p.unsafeDone(IO.fail(())) }
   }
 }
