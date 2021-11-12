@@ -228,7 +228,7 @@ object Adapters {
             _ => true
           )
       }
-      .map(_ => if (!subscription.canceled) subscriber.onComplete())
+      .map(_ => if (!subscription.isCanceled) subscriber.onComplete())
 
   private class DemandTrackingSubscription(subscriber: Subscriber[_]) extends Subscription {
 
@@ -265,7 +265,7 @@ object Adapters {
       result
     }
 
-    def canceled: Boolean = state.get().requestedCount < 0
+    def isCanceled: Boolean = state.get().requestedCount < 0
 
     override def request(n: Long): Unit = {
       if (n <= 0) subscriber.onError(new IllegalArgumentException("non-positive subscription request"))
