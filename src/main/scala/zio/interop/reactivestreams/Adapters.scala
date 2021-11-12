@@ -10,8 +10,7 @@ import zio.stream.ZStream
 import zio.stream.ZStream.Pull
 
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
-import scala.util.control.NonFatal
+import java.util.concurrent.atomic.AtomicReference
 
 object Adapters {
 
@@ -220,66 +219,74 @@ object Adapters {
           .iterate(chunk)(!_.isEmpty) { chunk =>
             subscription
               .offer(chunk.size)
-              .flatMap(next => UIO.foreach(chunk.take(next))(a => UIO(subscriber.onNext(a))).as(chunk.drop(next)))
+              .flatMap { acceptedCount =>
+                UIO.foreach(chunk.take(acceptedCount))(a => UIO(subscriber.onNext(a))).as(chunk.drop(acceptedCount))
+              }
           }
-          .fold(_ => false, _ => true)
+          .fold(
+            _ => false, // canceled
+            _ => true
+          )
       }
       .map(_ => if (!subscription.canceled) subscriber.onComplete())
 
   private class DemandTrackingSubscription(subscriber: Subscriber[_]) extends Subscription {
 
-    // < 0 when cancelled
-    private val requestedCount = new AtomicLong(0L)
-    @volatile
-    private var toNotify: Option[(Int, Promise[Unit, Int])] = None
+    case class State(
+      requestedCount: Long, // -1 when cancelled
+      toNotify: Option[(Int, Promise[Unit, Int])]
+    )
 
-    def offer(n: Int): IO[Unit, Int] = {
-      def shortCircuitOr(f: => IO[Unit, Int]): IO[Unit, Int] = {
-        val old = requestedCount.getAndUpdate(old => if (old >= 0L) Math.max(old - n, 0L) else old)
-        val got = Math.min(old, n.toLong).toInt
-        if (got < 0) {
-          IO.fail(())
-        } else if (got > 0) {
-          IO.succeedNow(got)
-        } else {
-          f
-        }
-      }
-      shortCircuitOr {
-        val p = Promise.unsafeMake[Unit, Int](FiberId.None)
-        toNotify = Some((n, p))
-        shortCircuitOr(p.await)
-      }
+    object State {
+      val initial                                 = State(0L, None)
+      val canceled                                = State(-1, None)
+      def requested(n: Long)                      = State(n, None)
+      def awaiting(n: Int, p: Promise[Unit, Int]) = State(0L, Some((n, p)))
     }
 
-    def canceled: Boolean = requestedCount.get() < 0L
+    private val state = new AtomicReference(State.initial)
+
+    def offer(n: Int): IO[Unit, Int] = {
+      var result: IO[Unit, Int] = null
+      state.updateAndGet {
+        case State.canceled =>
+          result = IO.fail(())
+          State.canceled
+        case State(0L, _) =>
+          val p = Promise.unsafeMake[Unit, Int](FiberId.None)
+          result = p.await
+          State.awaiting(n, p)
+        case State(requestedCount, _) =>
+          val newRequestedCount = Math.max(requestedCount - n, 0L)
+          val accepted          = Math.min(requestedCount, n.toLong).toInt
+          result = IO.succeedNow(accepted)
+          State.requested(newRequestedCount)
+      }
+      result
+    }
+
+    def canceled: Boolean = state.get().requestedCount < 0
 
     override def request(n: Long): Unit = {
       if (n <= 0) subscriber.onError(new IllegalArgumentException("non-positive subscription request"))
-      requestedCount.getAndUpdate { old =>
-        if (old >= 0L)
-          toNotify match {
-            case Some((o, p)) =>
-              val toOffer   = Math.min(o.toLong, n)
-              val remaining = n - toOffer
-              p.unsafeDone(IO.succeedNow(toOffer.toInt))
-              toNotify = None
-              remaining
-            case None =>
-              try {
-                Math.addExact(old, n)
-              } catch { case NonFatal(_) => Long.MaxValue }
-          }
-        else
-          old
+      state.getAndUpdate {
+        case State.canceled =>
+          State.canceled
+        case State(requestedCount, Some((offered, toNotify))) =>
+          val newRequestedCount = requestedCount + n
+          val accepted          = Math.min(offered.toLong, newRequestedCount)
+          val remaining         = newRequestedCount - accepted
+          toNotify.unsafeDone(IO.succeedNow(accepted.toInt))
+          State.requested(remaining)
+        case State(requestedCount, _) if ((Long.MaxValue - n) > requestedCount) =>
+          State.requested(requestedCount + n)
+        case _ =>
+          State.requested(Long.MaxValue)
       }
       ()
     }
 
-    override def cancel(): Unit = {
-      requestedCount.set(-1L)
-      toNotify.foreach(_._2.unsafeDone(IO.fail(())))
-      toNotify = None
-    }
+    override def cancel(): Unit =
+      state.getAndSet(State.canceled).toNotify.foreach { case (_, p) => p.unsafeDone(IO.fail(())) }
   }
 }
