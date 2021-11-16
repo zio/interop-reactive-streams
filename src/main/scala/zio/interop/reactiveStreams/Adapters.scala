@@ -187,10 +187,9 @@ object Adapters {
     runtime: Runtime[_]
   ): Subscription =
     new Subscription {
-      override def request(n: Long): Unit = {
+      override def request(n: Long): Unit =
         if (n <= 0) subscriber.onError(new IllegalArgumentException("non-positive subscription request"))
-        runtime.unsafeRunAsync_(demand.offer(n).unit)
-      }
+        else runtime.unsafeRunAsync_(demand.offer(n).unit)
       override def cancel(): Unit = runtime.unsafeRun(demand.shutdown)
     }
 }
