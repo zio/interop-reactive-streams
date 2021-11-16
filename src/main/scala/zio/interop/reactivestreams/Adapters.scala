@@ -267,6 +267,7 @@ object Adapters {
 
     override def request(n: Long): Unit = {
       if (n <= 0) subscriber.onError(new IllegalArgumentException("non-positive subscription request"))
+      var notification: () => Unit = () => ()
       state.getAndUpdate {
         case `canceled` =>
           canceled
@@ -274,14 +275,14 @@ object Adapters {
           val newRequestedCount = requestedCount + n
           val accepted          = Math.min(offered.toLong, newRequestedCount)
           val remaining         = newRequestedCount - accepted
-          toNotify.unsafeDone(IO.succeedNow(accepted.toInt))
+          notification = () => toNotify.unsafeDone(IO.succeedNow(accepted.toInt))
           requested(remaining)
         case State(requestedCount, _) if ((Long.MaxValue - n) > requestedCount) =>
           requested(requestedCount + n)
         case _ =>
           requested(Long.MaxValue)
       }
-      ()
+      notification()
     }
 
     override def cancel(): Unit =
