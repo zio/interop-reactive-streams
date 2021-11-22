@@ -16,26 +16,31 @@ object Adapters {
   def streamToPublisher[R, E <: Throwable, O](
     stream: => ZStream[R, E, O]
   )(implicit trace: ZTraceElement): ZIO[R, Nothing, Publisher[O]] =
-    ZIO.runtime.map { runtime => subscriber =>
-      if (subscriber == null) {
-        throw new NullPointerException("Subscriber must not be null.")
-      } else {
-        runtime.unsafeRunAsync(
-          for {
-            demand <- Queue.unbounded[Long]
-            _      <- UIO(subscriber.onSubscribe(createSubscription(subscriber, demand, runtime)))
-            _ <- stream
-                   .run(demandUnfoldSink(subscriber, demand))
-                   .catchAll(e => UIO(subscriber.onError(e)))
-                   .forkDaemon
-          } yield ()
-        )
+    ZIO.runtime.map { runtime =>
+      new Publisher[O] {
+        override def subscribe(subscriber: Subscriber[_ >: O]): Unit =
+          if (subscriber == null) {
+            throw new NullPointerException("Subscriber must not be null.")
+          } else {
+            runtime.unsafeRunAsync(
+              for {
+                demand <- Queue.unbounded[Long]
+                _      <- UIO(subscriber.onSubscribe(createSubscription(subscriber, demand, runtime)))
+                _ <- stream
+                       .run(demandUnfoldSink(subscriber, demand))
+                       .catchAll(e => UIO(subscriber.onError(e)))
+                       .forkDaemon
+              } yield ()
+            )
+          }
       }
     }
 
   def subscriberToSink[E <: Throwable, I](
     subscriber: => Subscriber[I]
-  )(implicit trace: ZTraceElement): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] = {
+  )(implicit
+    trace: ZTraceElement
+  ): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, E, I, E, I, Unit])] = {
     val sub = subscriber
     for {
       runtime     <- ZIO.runtime[Any].toManaged
@@ -62,11 +67,11 @@ object Adapters {
         process        <- process(sub, q, () => subscriber.await(), () => subscriber.isDone)
       } yield process
     val pull = pullOrFail.catchAll(e => ZManaged.succeed(Pull.fail(e)))
-    ZStream(pull)
+    ZStream.fromPull(pull)
   }
 
   def sinkToSubscriber[R, I, L, Z](
-    sink: => ZSink[R, Throwable, I, L, Z],
+    sink: => ZSink[R, Throwable, I, Throwable, L, Z],
     bufferSize: => Int
   )(implicit trace: ZTraceElement): ZManaged[R, Throwable, (Subscriber[I], IO[Throwable, Z])] =
     for {
@@ -76,7 +81,7 @@ object Adapters {
                process(subscription, q, () => subscriber.await(), () => subscriber.isDone, bufferSize)
              }
                .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
-      fiber <- ZStream(pull).run(sink).toManaged.fork
+      fiber <- ZStream.fromPull(pull).run(sink).toManaged.fork
     } yield (subscriber, fiber.join)
 
   private def process[A](
@@ -210,12 +215,12 @@ object Adapters {
       (subscriber, p)
     }
 
-  private def demandUnfoldSink[I](
+  private def demandUnfoldSink[E, I](
     subscriber: Subscriber[_ >: I],
     demand: Queue[Long]
-  ): ZSink[Any, Nothing, I, I, Unit] =
+  ): ZSink[Any, E, I, E, I, Unit] =
     ZSink
-      .foldChunksZIO[Any, Nothing, I, Long](0L)(_ >= 0L) { (bufferedDemand, chunk) =>
+      .foldChunksZIO[Any, E, I, Long](0L)(_ >= 0L) { (bufferedDemand, chunk) =>
         UIO
           .iterate((chunk, bufferedDemand))(!_._1.isEmpty) { case (chunk, bufferedDemand) =>
             demand.isShutdown.flatMap {
@@ -223,10 +228,10 @@ object Adapters {
               case false =>
                 if (chunk.size.toLong <= bufferedDemand)
                   UIO
-                    .foreach(chunk)(a => UIO(subscriber.onNext(a)))
+                    .foreachDiscard(chunk)(a => UIO(subscriber.onNext(a)))
                     .as((Chunk.empty, bufferedDemand - chunk.size.toLong))
                 else
-                  UIO.foreach(chunk.take(bufferedDemand.toInt))(a => UIO(subscriber.onNext(a))) *>
+                  UIO.foreachDiscard(chunk.take(bufferedDemand.toInt))(a => UIO(subscriber.onNext(a))) *>
                     demand.take.map((chunk.drop(bufferedDemand.toInt), _))
             }
           }
