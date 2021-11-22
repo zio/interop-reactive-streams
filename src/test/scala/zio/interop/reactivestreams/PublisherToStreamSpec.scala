@@ -46,7 +46,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           runtime    <- ZIO.runtime[Any]
           testRuntime = runtime
 //            .mapRuntimeConfig(_.copy(supervisor = supervisor))
-          exit        = testRuntime.unsafeRun(publisher.toStream().runDrain.exit)
+          exit = testRuntime.unsafeRun(publisher.toStream().runDrain.exit)
 //          stats      <- supervisor.value
         } yield assert(exit)(fails(anything)) /* &&
           assert(stats.failures)(equalTo(0L))*/
