@@ -8,7 +8,6 @@ import org.reactivestreams.tck.TestEnvironment.ManualPublisher
 import zio.Chunk
 import zio.Exit
 import zio.Promise
-// import zio.Supervisor
 import zio.Task
 import zio.UIO
 import zio.ZIO
@@ -17,6 +16,10 @@ import zio.stream.Sink
 import zio.stream.Stream
 import zio.test.Assertion._
 import zio.test._
+import zio.ZEnvironment
+import zio.Supervisor
+import zio.ZTraceElement
+import zio.Fiber
 
 object PublisherToStreamSpec extends DefaultRunnableSpec {
 
@@ -31,25 +34,46 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
       test("fails with an eventually failing `Publisher`") {
         assertM(publish(seq, Some(e)))(fails(equalTo(e)))
       },
-      // test("does not fail a fiber on failing `Publisher`") {
-      //   val publisher = new Publisher[Int] {
-      //     override def subscribe(s: Subscriber[_ >: Int]): Unit =
-      //       s.onSubscribe(
-      //         new Subscription {
-      //           override def request(n: Long): Unit = s.onError(new Throwable("boom!"))
-      //           override def cancel(): Unit         = ()
-      //         }
-      //       )
-      //   }
-      //   val supervisor = Supervisor.runtimeStats
-      //   for {
-      //     runtime    <- ZIO.runtime[Any]
-      //     testRuntime = runtime.mapRuntimeConfig(_.copy(supervisor = supervisor))
-      //     exit        = testRuntime.unsafeRun(publisher.toStream().runDrain.exit)
-      //     stats      <- supervisor.value
-      //   } yield assert(exit)(fails(anything)) &&
-      //     assert(stats.failures)(equalTo(0L))
-      // },
+      test("does not fail a fiber on failing `Publisher`") {
+        val publisher = new Publisher[Int] {
+          override def subscribe(s: Subscriber[_ >: Int]): Unit =
+            s.onSubscribe(
+              new Subscription {
+                override def request(n: Long): Unit = s.onError(new Throwable("boom!"))
+                override def cancel(): Unit         = ()
+              }
+            )
+        }
+
+        val supervisor =
+          new Supervisor[Boolean] {
+
+            @transient var failedAFiber = false
+
+            def value(implicit trace: ZTraceElement): UIO[Boolean] =
+              UIO(failedAFiber)
+
+            def unsafeOnStart[R, E, A](
+              environment: ZEnvironment[R],
+              effect: ZIO[R, E, A],
+              parent: Option[Fiber.Runtime[Any, Any]],
+              fiber: Fiber.Runtime[E, A]
+            ): Unit = ()
+
+            def unsafeOnEnd[R, E, A](value: Exit[E, A], fiber: Fiber.Runtime[E, A]): Unit =
+              if (value.isFailure) failedAFiber = true
+
+          }
+
+        for {
+          outerRuntime <- ZIO.runtime[Any]
+          runtime       = outerRuntime.mapRuntimeConfig(_.copy(supervisor = supervisor))
+          exit         <- runtime.run(publisher.toStream().runDrain.exit)
+          failed       <- supervisor.value
+        } yield assert(exit)(fails(anything)) &&
+          assert(failed)(isFalse)
+
+      },
       test("does not freeze on stream end") {
         withProbe(probe =>
           for {
