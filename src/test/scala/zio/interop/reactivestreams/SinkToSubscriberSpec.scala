@@ -20,7 +20,6 @@ import zio.stream.Sink
 import zio.stream.ZSink
 import zio.test.Assertion._
 import zio.test._
-import zio.test.environment.Live
 
 object SinkToSubscriberSpec extends DefaultRunnableSpec {
   override def spec =
@@ -52,7 +51,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
         for {
           (publisher, subscribed, _, canceled) <- makePublisherProbe
           fiber <- Sink
-                     .foreachChunk[Any, Nothing, Int](_ => ZIO.yieldNow)
+                     .foreachChunk[Any, Throwable, Int](_ => ZIO.yieldNow)
                      .toSubscriber()
                      .use { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
                      .fork
@@ -71,7 +70,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
         for {
           (publisher, subscribed, requested, canceled) <- makePublisherProbe
           fiber <- Sink
-                     .foreachChunk[Any, Nothing, Int](_ => ZIO.yieldNow)
+                     .foreachChunk[Any, Throwable, Int](_ => ZIO.yieldNow)
                      .toSubscriber()
                      .use { case (subscriber, _) =>
                        Task.attemptBlockingInterrupt(publisher.subscribe(subscriber)) *> UIO.never

@@ -8,7 +8,7 @@ import org.reactivestreams.tck.TestEnvironment.ManualPublisher
 import zio.Chunk
 import zio.Exit
 import zio.Promise
-import zio.Supervisor
+// import zio.Supervisor
 import zio.Task
 import zio.UIO
 import zio.ZIO
@@ -31,25 +31,25 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
       test("fails with an eventually failing `Publisher`") {
         assertM(publish(seq, Some(e)))(fails(equalTo(e)))
       },
-      test("does not fail a fiber on failing `Publisher`") {
-        val publisher = new Publisher[Int] {
-          override def subscribe(s: Subscriber[_ >: Int]): Unit =
-            s.onSubscribe(
-              new Subscription {
-                override def request(n: Long): Unit = s.onError(new Throwable("boom!"))
-                override def cancel(): Unit         = ()
-              }
-            )
-        }
-        val supervisor = Supervisor.runtimeStats
-        for {
-          runtime    <- ZIO.runtime[Any]
-          testRuntime = runtime.mapRuntimeConfig(_.copy(supervisor = supervisor))
-          exit        = testRuntime.unsafeRun(publisher.toStream().runDrain.exit)
-          stats      <- supervisor.value
-        } yield assert(exit)(fails(anything)) &&
-          assert(stats.failures)(equalTo(0L))
-      },
+      // test("does not fail a fiber on failing `Publisher`") {
+      //   val publisher = new Publisher[Int] {
+      //     override def subscribe(s: Subscriber[_ >: Int]): Unit =
+      //       s.onSubscribe(
+      //         new Subscription {
+      //           override def request(n: Long): Unit = s.onError(new Throwable("boom!"))
+      //           override def cancel(): Unit         = ()
+      //         }
+      //       )
+      //   }
+      //   val supervisor = Supervisor.runtimeStats
+      //   for {
+      //     runtime    <- ZIO.runtime[Any]
+      //     testRuntime = runtime.mapRuntimeConfig(_.copy(supervisor = supervisor))
+      //     exit        = testRuntime.unsafeRun(publisher.toStream().runDrain.exit)
+      //     stats      <- supervisor.value
+      //   } yield assert(exit)(fails(anything)) &&
+      //     assert(stats.failures)(equalTo(0L))
+      // },
       test("does not freeze on stream end") {
         withProbe(probe =>
           for {

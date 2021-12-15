@@ -21,8 +21,7 @@ package object reactivestreams {
       Adapters.streamToPublisher(stream)
   }
 
-  final implicit class sinkToSubscriber[R, E <: Throwable, A, L, Z](private val sink: ZSink[R, E, A, L, Z])
-      extends AnyVal {
+  final implicit class sinkToSubscriber[R, E <: Throwable, A, L, Z](private val sink: ZSink[R, E, A, L, Z]) {
 
     /** Create a `Subscriber` from a `Sink`. The returned IO will eventually return the result of running the subscribed
       * stream to the sink. Consumption is started as soon as the resource is used, even if the IO is never run.
