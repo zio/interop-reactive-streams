@@ -57,9 +57,12 @@ object Adapters {
         subscriberP    <- makeSubscriber[O](bufferSize)
         (subscriber, p) = subscriberP
         _              <- ZManaged.acquireReleaseSucceed(publisher.subscribe(subscriber))(subscriber.interrupt())
-        subQ           <- p.await.interruptible.toManaged
-        (sub, q)        = subQ
-        process        <- process(sub, q, () => subscriber.await(), () => subscriber.isDone)
+        subQ <- p.await.interruptible
+                  .onTermination(_ => UIO(subscriber.interrupt()))
+                  .uninterruptible
+                  .toManaged
+        (sub, q) = subQ
+        process <- process(sub, q, () => subscriber.await(), () => subscriber.isDone)
       } yield process
     val pull = pullOrFail.catchAll(e => ZManaged.succeed(Pull.fail(e)))
     ZStream.fromPull(pull)
@@ -140,7 +143,9 @@ object Adapters {
           @volatile
           var toNotify: Option[Promise[Option[Throwable], Unit]] = None
 
-          override def interrupt(): Unit = isSubscribedOrInterrupted.set(true)
+          override def interrupt(): Unit =
+            // println("IS interrupt")
+            isSubscribedOrInterrupted.set(true)
 
           override def await(): IO[Option[Throwable], Unit] =
             done match {
