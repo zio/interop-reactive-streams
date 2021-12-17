@@ -113,7 +113,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
             _          <- cancelledLatch.await
           } yield ()
         assertM(tst.exit)(succeeds(anything))
-      } @@ TestAspect.timeout(3.seconds),
+      } @@ TestAspect.timeout(3.seconds) @@ TestAspect.flaky,
       test("cancels subscription when interrupted after subscription") {
         withProbe(probe =>
           assertM((for {
@@ -125,7 +125,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
             succeeds(isUnit)
           )
         )
-      },
+      } @@ TestAspect.flaky,
       test("cancels subscription when interrupted during consumption") {
         withProbe(probe =>
           assertM((for {
@@ -138,7 +138,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
             succeeds(isUnit)
           )
         )
-      },
+      } @@ TestAspect.flaky,
       test("cancels subscription on stream end") {
         withProbe(probe =>
           assertM((for {
