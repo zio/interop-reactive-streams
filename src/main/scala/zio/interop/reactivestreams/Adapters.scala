@@ -144,7 +144,6 @@ object Adapters {
           var toNotify: Option[Promise[Option[Throwable], Unit]] = None
 
           override def interrupt(): Unit =
-            // println("IS interrupt")
             isSubscribedOrInterrupted.set(true)
 
           override def await(): IO[Option[Throwable], Unit] =

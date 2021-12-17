@@ -7,19 +7,19 @@ import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualPublisher
 import zio.Chunk
 import zio.Exit
+import zio.Fiber
 import zio.Promise
+import zio.Supervisor
 import zio.Task
 import zio.UIO
+import zio.ZEnvironment
 import zio.ZIO
+import zio.ZTraceElement
 import zio.durationInt
 import zio.stream.Sink
 import zio.stream.Stream
 import zio.test.Assertion._
 import zio.test._
-import zio.ZEnvironment
-import zio.Supervisor
-import zio.ZTraceElement
-import zio.Fiber
 
 object PublisherToStreamSpec extends DefaultRunnableSpec {
 
