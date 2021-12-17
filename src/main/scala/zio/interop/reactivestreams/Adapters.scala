@@ -57,10 +57,10 @@ object Adapters {
         subscriberP    <- makeSubscriber[O](bufferSize)
         (subscriber, p) = subscriberP
         _              <- ZManaged.acquireReleaseSucceed(publisher.subscribe(subscriber))(subscriber.interrupt())
-        subQ <- p.await.interruptible
-                  .onTermination(_ => UIO(subscriber.interrupt()))
-                  .uninterruptible
-                  .toManaged
+        subQ <- ZManaged.fromZIOUninterruptible(
+                  p.await.interruptible
+                    .onTermination(_ => UIO(subscriber.interrupt()))
+                )
         (sub, q) = subQ
         process <- process(sub, q, () => subscriber.await(), () => subscriber.isDone)
       } yield process

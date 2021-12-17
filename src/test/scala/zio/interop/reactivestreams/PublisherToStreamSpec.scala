@@ -163,7 +163,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           } yield exit)(fails(anything))
         )
       }
-    ) @@ TestAspect.nonFlaky
+    )
 
   val e: Throwable    = new RuntimeException("boom")
   val seq: Chunk[Int] = Chunk.fromIterable(List.range(0, 100))
