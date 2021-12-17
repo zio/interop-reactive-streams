@@ -42,7 +42,7 @@ object Adapters {
       demand      <- Queue.unbounded[Long].toManaged
       error       <- Promise.make[E, Nothing].toManaged
       subscription = createSubscription(sub, demand, runtime)
-      _           <- UIO(sub.onSubscribe(subscription)).toManaged
+      _           <- ZManaged.succeed(sub.onSubscribe(subscription))
       _           <- error.await.catchAll(t => UIO(sub.onError(t)) *> demand.shutdown).toManaged.fork
     } yield (error, demandUnfoldSink(sub, demand))
   }
@@ -51,18 +51,21 @@ object Adapters {
     publisher: => Publisher[O],
     bufferSize: => Int
   )(implicit trace: ZTraceElement): ZStream[Any, Throwable, O] = {
+
     val pullOrFail =
       for {
         subscriberP    <- makeSubscriber[O](bufferSize)
         (subscriber, p) = subscriberP
-        _              <- ZManaged.finalizer(UIO(subscriber.interrupt()))
-        _              <- ZManaged.succeed(publisher.subscribe(subscriber))
-        subQ           <- p.await.toManaged
-        (sub, q)        = subQ
-        process        <- process(sub, q, () => subscriber.await(), () => subscriber.isDone)
+        _              <- ZManaged.acquireReleaseSucceed(publisher.subscribe(subscriber))(subscriber.interrupt())
+        subQ <- ZManaged.fromZIOUninterruptible(
+                  p.await.interruptible
+                    .onTermination(_ => UIO(subscriber.interrupt()))
+                )
+        (sub, q) = subQ
+        process <- process(sub, q, () => subscriber.await(), () => subscriber.isDone)
       } yield process
     val pull = pullOrFail.catchAll(e => ZManaged.succeed(Pull.fail(e)))
-    ZStream(pull)
+    ZStream.fromPull(pull)
   }
 
   def sinkToSubscriber[R, I, L, Z](
@@ -76,7 +79,7 @@ object Adapters {
                process(subscription, q, () => subscriber.await(), () => subscriber.isDone, bufferSize)
              }
                .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
-      fiber <- ZStream(pull).run(sink).toManaged.fork
+      fiber <- ZStream.fromPull(pull).run(sink).toManaged.fork
     } yield (subscriber, fiber.join)
 
   private def process[A](
@@ -140,7 +143,8 @@ object Adapters {
           @volatile
           var toNotify: Option[Promise[Option[Throwable], Unit]] = None
 
-          override def interrupt(): Unit = isSubscribedOrInterrupted.set(true)
+          override def interrupt(): Unit =
+            isSubscribedOrInterrupted.set(true)
 
           override def await(): IO[Option[Throwable], Unit] =
             done match {
@@ -223,10 +227,10 @@ object Adapters {
               case false =>
                 if (chunk.size.toLong <= bufferedDemand)
                   UIO
-                    .foreach(chunk)(a => UIO(subscriber.onNext(a)))
+                    .foreachDiscard(chunk)(a => UIO(subscriber.onNext(a)))
                     .as((Chunk.empty, bufferedDemand - chunk.size.toLong))
                 else
-                  UIO.foreach(chunk.take(bufferedDemand.toInt))(a => UIO(subscriber.onNext(a))) *>
+                  UIO.foreachDiscard(chunk.take(bufferedDemand.toInt))(a => UIO(subscriber.onNext(a))) *>
                     demand.take.map((chunk.drop(bufferedDemand.toInt), _))
             }
           }
