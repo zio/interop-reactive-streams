@@ -2,10 +2,12 @@ package zio.interop.reactivestreams
 
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualSubscriberWithSubscriptionSupport
+import zio.durationInt
 import zio.IO
 import zio.Task
 import zio.UIO
 import zio.stream.Stream
+import zio.stream.ZStream
 import zio.test.Assertion._
 import zio.test._
 
@@ -33,14 +35,40 @@ object SubscriberToSinkSpec extends DefaultRunnableSpec {
         makeSubscriber.flatMap(probe =>
           probe.underlying
             .toSink[Throwable]
-            .use { case (error, sink) =>
+            .use { case (signalError, sink) =>
               for {
-                fiber    <- (Stream.fromIterable(seq) ++ Stream.fail(e)).run(sink).catchAll(t => error.fail(t)).fork
+                fiber    <- (Stream.fromIterable(seq) ++ Stream.fail(e)).run(sink).catchAll(signalError).fork
                 _        <- probe.request(length + 1)
                 elements <- probe.nextElements(length).exit
                 err      <- probe.expectError.exit
                 _        <- fiber.join
               } yield assert(elements)(succeeds(equalTo(seq))) && assert(err)(succeeds(equalTo(e)))
+            }
+        )
+      },
+      test("transports errors 2") {
+        makeSubscriber.flatMap(probe =>
+          probe.underlying
+            .toSink[Throwable]
+            .use { case (signalError, sink) =>
+              for {
+                _   <- ZStream.fail(e).run(sink).catchAll(signalError)
+                err <- probe.expectError.exit
+              } yield assert(err)(succeeds(equalTo(e)))
+            }
+        )
+      },
+      test("transports errors only once") {
+        makeSubscriber.flatMap(probe =>
+          probe.underlying
+            .toSink[Throwable]
+            .use { case (signalError, sink) =>
+              for {
+                _    <- ZStream.fail(e).run(sink).catchAll(signalError)
+                err  <- probe.expectError.exit
+                _    <- signalError(e)
+                err2 <- probe.expectError.timeout(100.millis).exit
+              } yield assert(err)(succeeds(equalTo(e))) && assert(err2)(fails(anything))
             }
         )
       }

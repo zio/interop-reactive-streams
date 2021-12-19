@@ -35,16 +35,20 @@ object Adapters {
 
   def subscriberToSink[E <: Throwable, I](
     subscriber: => Subscriber[I]
-  )(implicit trace: ZTraceElement): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] = {
+  )(implicit trace: ZTraceElement): ZManaged[Any, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] = {
     val sub = subscriber
     for {
-      runtime     <- ZIO.runtime[Any].toManaged
-      demand      <- Queue.unbounded[Long].toManaged
-      error       <- Promise.make[E, Nothing].toManaged
-      subscription = createSubscription(sub, demand, runtime)
-      _           <- ZManaged.succeed(sub.onSubscribe(subscription))
-      _           <- error.await.catchAll(t => UIO(sub.onError(t)) *> demand.shutdown).toManaged.fork
-    } yield (error, demandUnfoldSink(sub, demand))
+      runtime       <- ZIO.runtime[Any].toManaged
+      demand        <- Queue.unbounded[Long].toManaged
+      subscription   = createSubscription(sub, demand, runtime)
+      _             <- ZManaged.succeed(sub.onSubscribe(subscription))
+      errorSignaled <- Promise.makeManaged[Nothing, Boolean]
+    } yield {
+      val signalError = { e: E =>
+        ZIO.whenZIO(errorSignaled.complete(UIO.succeedNow(true)))(UIO(sub.onError(e)) *> demand.shutdown).unit
+      }
+      (signalError, demandUnfoldSink(sub, demand))
+    }
   }
 
   def publisherToStream[O](

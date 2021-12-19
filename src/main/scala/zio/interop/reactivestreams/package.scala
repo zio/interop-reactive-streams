@@ -3,7 +3,7 @@ package zio.interop
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
 import zio.IO
-import zio.Promise
+import zio.UIO
 import zio.ZIO
 import zio.ZManaged
 import zio.ZTraceElement
@@ -60,7 +60,7 @@ package object reactivestreams {
       */
     def toSink[E <: Throwable](implicit
       trace: ZTraceElement
-    ): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
+    ): ZManaged[Any, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
   }
 
