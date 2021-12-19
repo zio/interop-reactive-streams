@@ -44,9 +44,9 @@ object Adapters {
       _             <- ZManaged.succeed(sub.onSubscribe(subscription))
       errorSignaled <- Promise.makeManaged[Nothing, Boolean]
     } yield {
-      val signalError = { e: E =>
-        ZIO.whenZIO(errorSignaled.complete(UIO.succeedNow(true)))(UIO(sub.onError(e)) *> demand.shutdown).unit
-      }
+      val signalError =
+        (e: E) => ZIO.whenZIO(errorSignaled.complete(UIO.succeedNow(true)))(UIO(sub.onError(e)) *> demand.shutdown).unit
+
       (signalError, demandUnfoldSink(sub, demand))
     }
   }
