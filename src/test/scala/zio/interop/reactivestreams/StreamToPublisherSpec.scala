@@ -62,6 +62,6 @@ object StreamToPublisherSpec extends DefaultRunnableSpec {
                      .refineOrDie { case e: InvocationTargetException => e.getTargetException() }
                      .exit
             } yield assert(r)(succeeds(isUnit))
-          ) @@ TestAspect.nonFlaky(5)
+          )
       }
 }
