@@ -3,7 +3,7 @@ package zio.interop
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
 import zio.IO
-import zio.Promise
+import zio.UIO
 import zio.ZIO
 import zio.ZManaged
 import zio.ZTraceElement
@@ -21,8 +21,7 @@ package object reactivestreams {
       Adapters.streamToPublisher(stream)
   }
 
-  final implicit class sinkToSubscriber[R, E <: Throwable, A, L, Z](private val sink: ZSink[R, E, A, L, Z])
-      extends AnyVal {
+  final implicit class sinkToSubscriber[R, E <: Throwable, A, L, Z](private val sink: ZSink[R, E, A, L, Z]) {
 
     /** Create a `Subscriber` from a `Sink`. The returned IO will eventually return the result of running the subscribed
       * stream to the sink. Consumption is started as soon as the resource is used, even if the IO is never run.
@@ -61,7 +60,7 @@ package object reactivestreams {
       */
     def toSink[E <: Throwable](implicit
       trace: ZTraceElement
-    ): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] =
+    ): ZManaged[Any, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
   }
 

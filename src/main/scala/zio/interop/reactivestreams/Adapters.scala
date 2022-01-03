@@ -5,8 +5,7 @@ import org.reactivestreams.Subscriber
 import org.reactivestreams.Subscription
 import zio._
 import zio.internal.RingBuffer
-import zio.stream.ZSink
-import zio.stream.ZStream
+import zio.stream._
 import zio.stream.ZStream.Pull
 
 import java.util.concurrent.atomic.AtomicBoolean
@@ -36,32 +35,32 @@ object Adapters {
 
   def subscriberToSink[E <: Throwable, I](
     subscriber: => Subscriber[I]
-  )(implicit trace: ZTraceElement): ZManaged[Any, Nothing, (Promise[E, Nothing], ZSink[Any, Nothing, I, I, Unit])] = {
+  )(implicit trace: ZTraceElement): ZManaged[Any, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] = {
     val sub = subscriber
     for {
-      error       <- Promise.make[E, Nothing].toManaged
+      error       <- Promise.makeManaged[E, Nothing]
       subscription = new DemandTrackingSubscription(sub)
-      _           <- UIO(sub.onSubscribe(subscription)).toManaged
+      _           <- ZManaged.succeed(sub.onSubscribe(subscription))
       _           <- error.await.catchAll(t => UIO(sub.onError(t))).toManaged.fork
-    } yield (error, demandUnfoldSink(sub, subscription))
+    } yield (error.fail(_).unit, demandUnfoldSink(sub, subscription))
   }
 
   def publisherToStream[O](
     publisher: => Publisher[O],
     bufferSize: => Int
   )(implicit trace: ZTraceElement): ZStream[Any, Throwable, O] = {
+
     val pullOrFail =
       for {
         subscriberP    <- makeSubscriber[O](bufferSize)
         (subscriber, p) = subscriberP
-        _              <- ZManaged.finalizer(UIO(subscriber.interrupt()))
-        _              <- ZManaged.succeed(publisher.subscribe(subscriber))
-        subQ           <- p.await.toManaged
+        _              <- ZManaged.acquireReleaseSucceed(publisher.subscribe(subscriber))(subscriber.interrupt())
+        subQ           <- ZManaged.fromZIOUninterruptible(p.await.interruptible)
         (sub, q)        = subQ
         process        <- process(sub, q, () => subscriber.await(), () => subscriber.isDone)
       } yield process
     val pull = pullOrFail.catchAll(e => ZManaged.succeed(Pull.fail(e)))
-    ZStream(pull)
+    fromPull(pull)
   }
 
   def sinkToSubscriber[R, I, L, Z](
@@ -75,7 +74,7 @@ object Adapters {
                process(subscription, q, () => subscriber.await(), () => subscriber.isDone, bufferSize)
              }
                .catchAll(e => ZManaged.succeedNow(Pull.fail(e)))
-      fiber <- ZStream(pull).run(sink).toManaged.fork
+      fiber <- fromPull(pull).run(sink).toManaged.fork
     } yield (subscriber, fiber.join)
 
   private def process[A](
@@ -139,7 +138,8 @@ object Adapters {
           @volatile
           var toNotify: Option[Promise[Option[Throwable], Unit]] = None
 
-          override def interrupt(): Unit = isSubscribedOrInterrupted.set(true)
+          override def interrupt(): Unit =
+            isSubscribedOrInterrupted.set(true)
 
           override def await(): IO[Option[Throwable], Unit] =
             done match {
@@ -288,4 +288,38 @@ object Adapters {
     override def cancel(): Unit =
       state.getAndSet(canceled).toNotify.foreach { case (_, p) => p.unsafeDone(IO.fail(())) }
   }
+
+  private def fromPull[R, E, A](zio: ZManaged[R, Nothing, ZIO[R, Option[E], Chunk[A]]])(implicit
+    trace: ZTraceElement
+  ): ZStream[R, E, A] =
+    unwrapManaged(zio.map(pull => ZStream.repeatZIOChunkOption(pull)))
+
+  private def unwrapManaged[R, E, A](fa: => ZManaged[R, E, ZStream[R, E, A]])(implicit
+    trace: ZTraceElement
+  ): ZStream[R, E, A] =
+    managed(fa).flatten
+
+  private def managed[R, E, A](managed: => ZManaged[R, E, A])(implicit trace: ZTraceElement): ZStream[R, E, A] =
+    new ZStream(managedOut(managed.map(Chunk.single)))
+
+  private def managedOut[R, E, A](
+    m: => ZManaged[R, E, A]
+  )(implicit trace: ZTraceElement): ZChannel[R, Any, Any, Any, E, A, Any] =
+    ZChannel
+      .acquireReleaseOutExitWith(
+        ZManaged.ReleaseMap.make.flatMap { releaseMap =>
+          ZIO.uninterruptibleMask { restore =>
+            ZManaged.currentReleaseMap
+              .locally(releaseMap)(restore(m.zio))
+              .foldCauseZIO(
+                cause =>
+                  releaseMap.releaseAll(Exit.failCause(cause), ExecutionStrategy.Sequential) *> ZIO.failCause(cause),
+                { case (_, out) => ZIO.succeedNow((out, releaseMap)) }
+              )
+          }
+        }
+      ) { case ((_, releaseMap), exit) =>
+        releaseMap.releaseAll(exit, ExecutionStrategy.Sequential)
+      }
+      .mapOut(_._1)
 }
