@@ -41,8 +41,8 @@ object Adapters {
       error       <- Promise.makeManaged[E, Nothing]
       subscription = new DemandTrackingSubscription(sub)
       _           <- ZManaged.succeed(sub.onSubscribe(subscription))
-      _           <- error.await.catchAll(t => UIO(sub.onError(t))).toManaged.fork
-    } yield (error.fail(_).unit, demandUnfoldSink(sub, subscription))
+      fiber       <- error.await.catchAll(t => UIO(sub.onError(t))).toManaged.fork
+    } yield (error.fail(_) *> fiber.join, demandUnfoldSink(sub, subscription))
   }
 
   def publisherToStream[O](
