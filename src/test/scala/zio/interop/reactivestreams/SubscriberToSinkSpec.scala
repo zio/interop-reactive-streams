@@ -15,7 +15,7 @@ object SubscriberToSinkSpec extends DefaultRunnableSpec {
     suite("Converting a `Subscriber` to a `Sink`")(
       test("works on the happy path") {
         makeSubscriber.flatMap(probe =>
-          ZIO.scoped {
+          ZIO.scoped[Any] {
             probe.underlying
               .toSink[Throwable]
               .flatMap { case (_, sink) =>
@@ -32,7 +32,7 @@ object SubscriberToSinkSpec extends DefaultRunnableSpec {
       },
       test("transports errors") {
         makeSubscriber.flatMap(probe =>
-          ZIO.scoped {
+          ZIO.scoped[Any] {
             probe.underlying
               .toSink[Throwable]
               .flatMap { case (signalError, sink) =>
@@ -49,7 +49,7 @@ object SubscriberToSinkSpec extends DefaultRunnableSpec {
       },
       test("transports errors 2") {
         makeSubscriber.flatMap(probe =>
-          ZIO.scoped {
+          ZIO.scoped[Any] {
             probe.underlying
               .toSink[Throwable]
               .flatMap { case (signalError, sink) =>
