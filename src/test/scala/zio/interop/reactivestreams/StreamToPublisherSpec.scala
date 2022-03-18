@@ -55,7 +55,7 @@ object StreamToPublisherSpec extends DefaultRunnableSpec {
             for {
               runtime <- ZIO.runtime[Any]
               pv       = makePV(runtime)
-              _       <- UIO(pv.setUp())
+              _       <- UIO.succeed(pv.setUp())
               r <- Task
                      .attemptBlockingInterrupt(method.invoke(pv))
                      .unit

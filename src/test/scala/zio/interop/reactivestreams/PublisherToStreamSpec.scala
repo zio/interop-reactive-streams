@@ -52,7 +52,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
             @transient var failedAFiber = false
 
             def value(implicit trace: ZTraceElement): UIO[Boolean] =
-              UIO(failedAFiber)
+              UIO.succeed(failedAFiber)
 
             def unsafeOnStart[R, E, A](
               environment: ZEnvironment[R],
@@ -79,7 +79,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           for {
             fiber <- Stream
                        .fromZIO(
-                         UIO(
+                         UIO.succeed(
                            probe.toStream()
                          )
                        )
@@ -87,8 +87,8 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
                        .run(Sink.collectAll[Int])
                        .fork
             _ <- Task.attemptBlockingInterrupt(probe.expectRequest())
-            _ <- UIO(probe.sendNext(1))
-            _ <- UIO(probe.sendCompletion)
+            _ <- UIO.succeed(probe.sendNext(1))
+            _ <- UIO.succeed(probe.sendCompletion)
             r <- fiber.join
           } yield assert(r)(equalTo(Chunk(1)))
         )
@@ -109,7 +109,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
             fiber      <- probe.toStream(bufferSize).runDrain.fork
             subscriber <- subscriberP.await
             _          <- fiber.interrupt
-            _          <- UIO(subscriber.onSubscribe(subscription))
+            _          <- UIO.succeed(subscriber.onSubscribe(subscription))
             _          <- cancelledLatch.await
           } yield ()
         assertM(tst.exit)(succeeds(anything))
@@ -131,7 +131,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           assertM((for {
             fiber  <- probe.toStream(bufferSize).runDrain.fork
             demand <- Task.attemptBlockingInterrupt(probe.expectRequest())
-            _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+            _      <- Task.attempt((1 to demand.toInt).foreach(i => probe.sendNext(i)))
             _      <- fiber.interrupt
             _      <- Task.attemptBlockingInterrupt(probe.expectCancelling())
           } yield ()).exit)(
@@ -144,7 +144,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           assertM((for {
             fiber  <- probe.toStream(bufferSize).take(1).runDrain.fork
             demand <- Task.attemptBlockingInterrupt(probe.expectRequest())
-            _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+            _      <- Task.attempt((1 to demand.toInt).foreach(i => probe.sendNext(i)))
             _      <- Task.attemptBlockingInterrupt(probe.expectCancelling())
             _      <- fiber.join
           } yield ()).exit)(
@@ -157,7 +157,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
           assertM(for {
             fiber  <- probe.toStream(bufferSize).mapZIO(_ => Task.fail(new Throwable("boom!"))).runDrain.fork
             demand <- Task.attemptBlockingInterrupt(probe.expectRequest())
-            _      <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+            _      <- Task.attempt((1 to demand.toInt).foreach(i => probe.sendNext(i)))
             _      <- Task.attemptBlockingInterrupt(probe.expectCancelling())
             exit   <- fiber.join.exit
           } yield exit)(fails(anything))
@@ -172,7 +172,7 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
   def withProbe[R, E0, E >: Throwable, A](f: ManualPublisher[Int] => ZIO[R, E, A]): ZIO[R, E, A] = {
     val testEnv = new TestEnvironment(3000, 500)
     val probe   = new ManualPublisher[Int](testEnv)
-    f(probe) <* Task(testEnv.verifyNoAsyncErrorsNoDelay())
+    f(probe) <* Task.attempt(testEnv.verifyNoAsyncErrorsNoDelay())
   }
 
   def publish(seq: Chunk[Int], failure: Option[Throwable]): UIO[Exit[Throwable, Chunk[Int]]] = {
@@ -180,12 +180,12 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
     def loop(probe: ManualPublisher[Int], remaining: Chunk[Int]): Task[Unit] =
       for {
         n            <- Task.attemptBlockingInterrupt(probe.expectRequest())
-        _            <- Task(assert(n.toInt)(isLessThanEqualTo(bufferSize)))
+        _            <- Task.attempt(assert(n.toInt)(isLessThanEqualTo(bufferSize)))
         split         = n.toInt
         (nextN, tail) = remaining.splitAt(split)
-        _            <- Task(nextN.foreach(probe.sendNext))
+        _            <- Task.attempt(nextN.foreach(probe.sendNext))
         _ <- if (nextN.size < split)
-               Task(failure.fold(probe.sendCompletion())(probe.sendError))
+               Task.attempt(failure.fold(probe.sendCompletion())(probe.sendError))
              else loop(probe, tail)
       } yield ()
 

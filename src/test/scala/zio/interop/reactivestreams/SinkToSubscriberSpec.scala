@@ -13,7 +13,6 @@ import zio.Promise
 import zio.Task
 import zio.UIO
 import zio.ZIO
-import zio.ZManaged
 import zio.durationInt
 import zio.durationLong
 import zio.stream.Sink
@@ -26,15 +25,17 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
     suite("Converting a `Sink` to a `Subscriber`")(
       test("works on the happy path")(
         for {
-          (publisher, subscribed, requested, canceled) <- makePublisherProbe
-          fiber <- ZSink
-                     .fold[Int, Chunk[Int]](Chunk.empty)(_.size < 5)(_ :+ _)
-                     .map(_.toList)
-                     .toSubscriber()
-                     .use { case (subscriber, r) =>
-                       UIO(publisher.subscribe(subscriber)) *> r
-                     }
-                     .fork
+          tuple                                       <- makePublisherProbe
+          (publisher, subscribed, requested, canceled) = tuple
+          fiber <- ZIO.scoped {
+                     ZSink
+                       .fold[Int, Chunk[Int]](Chunk.empty)(_.size < 5)(_ :+ _)
+                       .map(_.toList)
+                       .toSubscriber()
+                       .flatMap { case (subscriber, r) =>
+                         UIO.succeed(publisher.subscribe(subscriber)) *> r
+                       }
+                   }.fork
           _ <- Live.live(
                  assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).exit)(succeeds(isUnit))
                )
@@ -49,12 +50,14 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
       ),
       test("cancels subscription on interruption after subscription")(
         for {
-          (publisher, subscribed, _, canceled) <- makePublisherProbe
-          fiber <- Sink
-                     .foreachChunk[Any, Throwable, Int](_ => ZIO.yieldNow)
-                     .toSubscriber()
-                     .use { case (subscriber, _) => UIO(publisher.subscribe(subscriber)) *> UIO.never }
-                     .fork
+          tuple                               <- makePublisherProbe
+          (publisher, subscribed, _, canceled) = tuple
+          fiber <- ZIO.scoped {
+                     Sink
+                       .foreachChunk[Any, Throwable, Int](_ => ZIO.yieldNow)
+                       .toSubscriber()
+                       .flatMap { case (subscriber, _) => UIO.succeed(publisher.subscribe(subscriber)) *> UIO.never }
+                   }.fork
           _ <-
             Live.live(
               assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).exit)(succeeds(isUnit))
@@ -68,14 +71,16 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
       ),
       test("cancels subscription on interruption during consuption")(
         for {
-          (publisher, subscribed, requested, canceled) <- makePublisherProbe
-          fiber <- Sink
-                     .foreachChunk[Any, Throwable, Int](_ => ZIO.yieldNow)
-                     .toSubscriber()
-                     .use { case (subscriber, _) =>
-                       Task.attemptBlockingInterrupt(publisher.subscribe(subscriber)) *> UIO.never
-                     }
-                     .fork
+          tuple                                       <- makePublisherProbe
+          (publisher, subscribed, requested, canceled) = tuple
+          fiber <- ZIO.scoped {
+                     Sink
+                       .foreachChunk[Any, Throwable, Int](_ => ZIO.yieldNow)
+                       .toSubscriber()
+                       .flatMap { case (subscriber, _) =>
+                         Task.attemptBlockingInterrupt(publisher.subscribe(subscriber)) *> UIO.never
+                       }
+                   }.fork
           _ <- assertM(subscribed.await.exit)(succeeds(isUnit))
           _ <- assertM(requested.await.exit)(succeeds(isUnit))
           _ <- fiber.interrupt
@@ -139,7 +144,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
     for {
       subscriber_    <- Sink.collectAll[Int].toSubscriber()
       (subscriber, _) = subscriber_
-      sbv <- ZManaged.acquireReleaseWith {
+      sbv <- ZIO.acquireRelease {
                val env = new TestEnvironment(1000, 500)
                val sbv =
                  new SubscriberWhiteboxVerification[Int](env) {
@@ -147,9 +152,9 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
                      ProbedSubscriber(subscriber, probe)
                    override def createElement(element: Int): Int = element
                  }
-               UIO(sbv.setUp()) *> UIO(sbv.startPublisherExecutorService()).as((sbv, env))
+               UIO.succeed(sbv.setUp()) *> UIO.succeed(sbv.startPublisherExecutorService()).as((sbv, env))
              } { case (sbv, _) =>
-               UIO(sbv.shutdownPublisherExecutorService())
+               UIO.succeed(sbv.shutdownPublisherExecutorService())
              }
     } yield sbv
 
@@ -168,9 +173,11 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
         case method =>
           test(method.getName())(
             for {
-              r <- managedVerification.use { case (sbv, env) =>
-                     Task.attemptBlockingInterrupt(method.invoke(sbv)).timeout(env.defaultTimeoutMillis().millis)
-                   }.unit.exit
+              r <- ZIO.scoped {
+                     managedVerification.flatMap { case (sbv, env) =>
+                       Task.attemptBlockingInterrupt(method.invoke(sbv)).timeout(env.defaultTimeoutMillis().millis)
+                     }.unit.exit
+                   }
             } yield assert(r)(succeeds(isUnit))
           )
       }
