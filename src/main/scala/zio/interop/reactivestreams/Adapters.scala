@@ -296,33 +296,5 @@ object Adapters {
   private def fromPull[R, E, A](zio: ZIO[R with Scope, Nothing, ZIO[R, Option[E], Chunk[A]]])(implicit
     trace: ZTraceElement
   ): ZStream[R, E, A] =
-    unwrapScoped[R, E, A](zio.map(pull => ZStream.repeatZIOChunkOption(pull)))
-
-  private def unwrapScoped[R, E, A](fa: => ZIO[R with Scope, E, ZStream[R, E, A]])(implicit
-    trace: ZTraceElement
-  ): ZStream[R, E, A] =
-    scoped[R, E, ZStream[R, E, A]](fa).flatten
-
-  private def scoped[R, E, A](zio: => ZIO[R with Scope, E, A])(implicit trace: ZTraceElement): ZStream[R, E, A] =
-    new ZStream(scopedOut[R, E, Chunk[A]](zio.map(Chunk.single(_))))
-
-  private def scopedOut[R, E, A](
-    zio: => ZIO[R with Scope, E, A]
-  )(implicit trace: ZTraceElement): ZChannel[R, Any, Any, Any, E, A, Any] =
-    ZChannel
-      .acquireReleaseOutExitWith(
-        ZIO.uninterruptibleMask { restore =>
-          Scope.make.flatMap { scope =>
-            scope
-              .use[R](restore(zio))
-              .foldCauseZIO(
-                cause => scope.close(Exit.failCause(cause)) *> ZIO.failCause(cause),
-                out => ZIO.succeedNow((out, scope))
-              )
-          }
-        }
-      ) { case ((_, scope), exit) =>
-        scope.close(exit)
-      }
-      .mapOut(_._1)
+    ZStream.unwrapScoped[R](zio.map(pull => ZStream.repeatZIOChunkOption(pull)))
 }
