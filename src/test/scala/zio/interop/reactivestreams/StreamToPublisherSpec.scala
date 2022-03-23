@@ -1,11 +1,8 @@
 package zio.interop.reactivestreams
 
 import org.reactivestreams.Publisher
-import org.reactivestreams.tck.PublisherVerification
-import org.reactivestreams.tck.TestEnvironment
+import org.reactivestreams.tck.{ PublisherVerification, TestEnvironment }
 import org.testng.annotations.Test
-import zio.Task
-import zio.UIO
 import zio.ZIO
 import zio.stream.Stream
 import zio.test.Assertion._
@@ -55,8 +52,8 @@ object StreamToPublisherSpec extends DefaultRunnableSpec {
             for {
               runtime <- ZIO.runtime[Any]
               pv       = makePV(runtime)
-              _       <- UIO(pv.setUp())
-              r <- Task
+              _       <- ZIO.succeed(pv.setUp())
+              r <- ZIO
                      .attemptBlockingInterrupt(method.invoke(pv))
                      .unit
                      .refineOrDie { case e: InvocationTargetException => e.getTargetException() }

@@ -2,11 +2,7 @@ package zio.interop
 
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
-import zio.IO
-import zio.UIO
-import zio.ZIO
-import zio.ZManaged
-import zio.ZTraceElement
+import zio.{ IO, Scope, UIO, ZIO, ZTraceElement }
 import zio.stream.ZSink
 import zio.stream.ZStream
 
@@ -32,7 +28,7 @@ package object reactivestreams {
       */
     def toSubscriber(qSize: Int = 16)(implicit
       trace: ZTraceElement
-    ): ZManaged[R, Throwable, (Subscriber[A], IO[Throwable, Z])] =
+    ): ZIO[R with Scope, Throwable, (Subscriber[A], IO[Throwable, Z])] =
       Adapters.sinkToSubscriber(sink, qSize)
   }
 
@@ -60,7 +56,7 @@ package object reactivestreams {
       */
     def toSink[E <: Throwable](implicit
       trace: ZTraceElement
-    ): ZManaged[Any, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] =
+    ): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
   }
 
