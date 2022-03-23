@@ -41,7 +41,7 @@ object Adapters {
       error       <- Promise.make[E, Nothing]
       subscription = new DemandTrackingSubscription(sub)
       _           <- ZIO.succeed(sub.onSubscribe(subscription))
-      fiber       <- error.await.catchAll(t => UIO.succeed(sub.onError(t))).fork
+      fiber       <- error.await.catchAll(t => UIO.succeed(sub.onError(t))).forkScoped
     } yield (error.fail(_) *> fiber.join, demandUnfoldSink(sub, subscription))
   }
 
@@ -74,7 +74,7 @@ object Adapters {
                process(subscription, q, () => subscriber.await(), () => subscriber.isDone, bufferSize)
              }
                .catchAll(e => ZIO.succeedNow(Pull.fail(e)))
-      fiber <- fromPull(pull).run(sink).fork
+      fiber <- fromPull(pull).run(sink).forkScoped
     } yield (subscriber, fiber.join)
 
   private def process[A](
