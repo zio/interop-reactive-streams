@@ -6,7 +6,7 @@ import zio.stream.{ Stream, ZStream }
 import zio.test.Assertion._
 import zio.test.TestAspect.nonFlaky
 import zio.test._
-import zio.{ IO, Task, UIO, ZIO, durationInt }
+import zio.{ IO, UIO, ZIO, durationInt }
 
 import scala.jdk.CollectionConverters._
 
@@ -100,16 +100,16 @@ object SubscriberToSinkSpec extends DefaultRunnableSpec {
 
   case class Probe[T](underlying: ManualSubscriberWithSubscriptionSupport[T]) {
     def request(n: Long): UIO[Unit] =
-      UIO.succeed(underlying.request(n))
+      ZIO.succeed(underlying.request(n))
     def nextElements(n: Long): IO[Throwable, List[T]] =
-      Task.attemptBlockingInterrupt(underlying.nextElements(n.toLong).asScala.toList)
+      ZIO.attemptBlockingInterrupt(underlying.nextElements(n.toLong).asScala.toList)
     def expectError: IO[Throwable, Throwable] =
-      Task.attemptBlockingInterrupt(underlying.expectError(classOf[Throwable]))
+      ZIO.attemptBlockingInterrupt(underlying.expectError(classOf[Throwable]))
     def expectCompletion: IO[Throwable, Unit] =
-      Task.attemptBlockingInterrupt(underlying.expectCompletion())
+      ZIO.attemptBlockingInterrupt(underlying.expectCompletion())
   }
 
   val makeSubscriber =
-    UIO.succeed(new ManualSubscriberWithSubscriptionSupport[Int](new TestEnvironment(2000))).map(Probe.apply)
+    ZIO.succeed(new ManualSubscriberWithSubscriptionSupport[Int](new TestEnvironment(2000))).map(Probe.apply)
 
 }

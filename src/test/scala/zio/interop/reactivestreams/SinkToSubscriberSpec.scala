@@ -1,22 +1,11 @@
 package zio.interop.reactivestreams
 
-import org.reactivestreams.Publisher
-import org.reactivestreams.Subscriber
-import org.reactivestreams.Subscription
-import org.reactivestreams.tck.SubscriberWhiteboxVerification
-import org.reactivestreams.tck.SubscriberWhiteboxVerification.SubscriberPuppet
-import org.reactivestreams.tck.SubscriberWhiteboxVerification.WhiteboxSubscriberProbe
-import org.reactivestreams.tck.TestEnvironment
+import org.reactivestreams.{ Publisher, Subscriber, Subscription }
+import org.reactivestreams.tck.SubscriberWhiteboxVerification.{ SubscriberPuppet, WhiteboxSubscriberProbe }
+import org.reactivestreams.tck.{ SubscriberWhiteboxVerification, TestEnvironment }
 import org.testng.annotations.Test
-import zio.Chunk
-import zio.Promise
-import zio.Task
-import zio.UIO
-import zio.ZIO
-import zio.durationInt
-import zio.durationLong
-import zio.stream.Sink
-import zio.stream.ZSink
+import zio.{ Chunk, Promise, ZIO, durationInt, durationLong }
+import zio.stream.{ Sink, ZSink }
 import zio.test.Assertion._
 import zio.test._
 
@@ -33,7 +22,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
                        .map(_.toList)
                        .toSubscriber()
                        .flatMap { case (subscriber, r) =>
-                         UIO.succeed(publisher.subscribe(subscriber)) *> r
+                         ZIO.succeed(publisher.subscribe(subscriber)) *> r
                        }
                    }.fork
           _ <- Live.live(
@@ -56,7 +45,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
                      Sink
                        .foreachChunk[Any, Throwable, Int](_ => ZIO.yieldNow)
                        .toSubscriber()
-                       .flatMap { case (subscriber, _) => UIO.succeed(publisher.subscribe(subscriber)) *> UIO.never }
+                       .flatMap { case (subscriber, _) => ZIO.succeed(publisher.subscribe(subscriber)) *> ZIO.never }
                    }.fork
           _ <-
             Live.live(
@@ -78,7 +67,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
                        .foreachChunk[Any, Throwable, Int](_ => ZIO.yieldNow)
                        .toSubscriber()
                        .flatMap { case (subscriber, _) =>
-                         Task.attemptBlockingInterrupt(publisher.subscribe(subscriber)) *> UIO.never
+                         ZIO.attemptBlockingInterrupt(publisher.subscribe(subscriber)) *> ZIO.never
                        }
                    }.fork
           _ <- assertM(subscribed.await.exit)(succeeds(isUnit))
@@ -103,14 +92,14 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
                       s.onSubscribe(
                         new Subscription {
                           override def request(n: Long): Unit = {
-                            requested.unsafeDone(UIO.unit)
+                            requested.unsafeDone(ZIO.unit)
                             (1 to n.toInt).foreach(s.onNext(_))
                           }
                           override def cancel(): Unit =
-                            canceled.unsafeDone(UIO.unit)
+                            canceled.unsafeDone(ZIO.unit)
                         }
                       )
-                      subscribed.unsafeDone(UIO.unit)
+                      subscribed.unsafeDone(ZIO.unit)
                     }
                   }
     } yield (publisher, subscribed, requested, canceled)
@@ -152,9 +141,9 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
                      ProbedSubscriber(subscriber, probe)
                    override def createElement(element: Int): Int = element
                  }
-               UIO.succeed(sbv.setUp()) *> UIO.succeed(sbv.startPublisherExecutorService()).as((sbv, env))
+               ZIO.succeed(sbv.setUp()) *> ZIO.succeed(sbv.startPublisherExecutorService()).as((sbv, env))
              } { case (sbv, _) =>
-               UIO.succeed(sbv.shutdownPublisherExecutorService())
+               ZIO.succeed(sbv.shutdownPublisherExecutorService())
              }
     } yield sbv
 
@@ -175,7 +164,7 @@ object SinkToSubscriberSpec extends DefaultRunnableSpec {
             for {
               r <- ZIO.scoped {
                      managedVerification.flatMap { case (sbv, env) =>
-                       Task.attemptBlockingInterrupt(method.invoke(sbv)).timeout(env.defaultTimeoutMillis().millis)
+                       ZIO.attemptBlockingInterrupt(method.invoke(sbv)).timeout(env.defaultTimeoutMillis().millis)
                      }.unit.exit
                    }
             } yield assert(r)(succeeds(isUnit))

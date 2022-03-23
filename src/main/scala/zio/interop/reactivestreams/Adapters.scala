@@ -23,10 +23,10 @@ object Adapters {
         val subscription = new DemandTrackingSubscription(subscriber)
         runtime.unsafeRunAsync(
           for {
-            _ <- UIO.succeed(subscriber.onSubscribe(subscription))
+            _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
             _ <- stream
                    .run(demandUnfoldSink(subscriber, subscription))
-                   .catchAll(e => UIO.succeed(subscriber.onError(e)))
+                   .catchAll(e => ZIO.succeed(subscriber.onError(e)))
                    .forkDaemon
           } yield ()
         )
@@ -41,7 +41,7 @@ object Adapters {
       error       <- Promise.make[E, Nothing]
       subscription = new DemandTrackingSubscription(sub)
       _           <- ZIO.succeed(sub.onSubscribe(subscription))
-      fiber       <- error.await.catchAll(t => UIO.succeed(sub.onError(t))).forkScoped
+      fiber       <- error.await.catchAll(t => ZIO.succeed(sub.onError(t))).forkScoped
     } yield (error.fail(_) *> fiber.join, demandUnfoldSink(sub, subscription))
   }
 
@@ -54,7 +54,7 @@ object Adapters {
       for {
         subscriberP    <- makeSubscriber[O](bufferSize)
         (subscriber, p) = subscriberP
-        _              <- ZIO.acquireRelease(ZIO.succeed(publisher.subscribe(subscriber)))(_ => UIO.succeed(subscriber.interrupt()))
+        _              <- ZIO.acquireRelease(ZIO.succeed(publisher.subscribe(subscriber)))(_ => ZIO.succeed(subscriber.interrupt()))
         subQ           <- p.await.interruptible
         (sub, q)        = subQ
         process        <- process(sub, q, () => subscriber.await(), () => subscriber.isDone)
@@ -92,13 +92,13 @@ object Adapters {
         for {
           requested <- requestedRef.get
           pollSize   = Math.min(requested, maxChunkSize.toLong).toInt
-          chunk     <- UIO.succeed(q.pollUpTo(pollSize))
+          chunk     <- ZIO.succeed(q.pollUpTo(pollSize))
           r <-
             if (chunk.isEmpty)
               await() *> pull
             else
               (if (chunk.size == pollSize && !isDone())
-                 UIO.succeed(sub.request(q.capacity.toLong)) *> requestedRef.set(q.capacity.toLong)
+                 ZIO.succeed(sub.request(q.capacity.toLong)) *> requestedRef.set(q.capacity.toLong)
                else requestedRef.set(requested - chunk.size)) *>
                 Pull.emit(chunk)
         } yield r
@@ -128,7 +128,7 @@ object Adapters {
              Promise
                .make[Throwable, (Subscription, RingBuffer[A])]
            )(
-             _.poll.flatMap(_.fold(UIO.unit)(_.foldZIO(_ => UIO.unit, { case (sub, _) => UIO.succeed(sub.cancel()) })))
+             _.poll.flatMap(_.fold(ZIO.unit)(_.foldZIO(_ => ZIO.unit, { case (sub, _) => ZIO.succeed(sub.cancel()) })))
            )
     } yield {
       val subscriber =
@@ -173,7 +173,7 @@ object Adapters {
               if (shouldCancel)
                 s.cancel()
               else
-                p.unsafeDone(UIO.succeedNow((s, q)))
+                p.unsafeDone(ZIO.succeedNow((s, q)))
             }
 
           override def onNext(t: A): Unit =
@@ -223,7 +223,7 @@ object Adapters {
               .offer(chunk.size)
               .flatMap { acceptedCount =>
                 UIO
-                  .foreach(chunk.take(acceptedCount))(a => UIO.succeed(subscriber.onNext(a)))
+                  .foreach(chunk.take(acceptedCount))(a => ZIO.succeed(subscriber.onNext(a)))
                   .as(chunk.drop(acceptedCount))
               }
           }
