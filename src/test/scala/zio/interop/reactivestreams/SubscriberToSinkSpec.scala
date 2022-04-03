@@ -10,7 +10,7 @@ import zio.{ IO, UIO, ZIO, durationInt }
 
 import scala.jdk.CollectionConverters._
 
-object SubscriberToSinkSpec extends DefaultRunnableSpec {
+object SubscriberToSinkSpec extends ZIOSpecDefault {
   override def spec =
     suite("Converting a `Subscriber` to a `Sink`")(
       test("works on the happy path") {
@@ -77,20 +77,17 @@ object SubscriberToSinkSpec extends DefaultRunnableSpec {
         }
       } @@ nonFlaky(10),
       test("transports errors only once") {
-        makeSubscriber.flatMap(probe =>
-          ZIO.scoped {
-            probe.underlying
-              .toSink[Throwable]
-              .flatMap { case (signalError, sink) =>
-                for {
-                  _    <- ZStream.fail(e).run(sink).catchAll(signalError)
-                  err  <- probe.expectError.exit
-                  _    <- signalError(e)
-                  err2 <- probe.expectError.timeout(100.millis).exit
-                } yield assert(err)(succeeds(equalTo(e))) && assert(err2)(fails(anything))
-              }
-          }
-        )
+        ZIO.scoped[Any] {
+          for {
+            probe              <- makeSubscriber
+            ses                <- probe.underlying.toSink
+            (signalError, sink) = ses
+            _                  <- ZStream.fail(e).run(sink).catchAll(signalError)
+            err                <- probe.expectError.exit
+            _                  <- signalError(e)
+            err2               <- probe.expectError.timeout(100.millis).exit
+          } yield assert(err)(succeeds(equalTo(e))) && assert(err2)(fails(anything))
+        }
       }
     )
 

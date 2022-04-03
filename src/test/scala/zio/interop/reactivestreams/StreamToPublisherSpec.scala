@@ -10,7 +10,7 @@ import zio.test._
 
 import java.lang.reflect.InvocationTargetException
 
-object StreamToPublisherSpec extends DefaultRunnableSpec {
+object StreamToPublisherSpec extends ZIOSpecDefault {
   override def spec =
     suite("Converting a `Stream` to a `Publisher`")(
       suite("passes all required and optional TCK tests")(tests: _*)

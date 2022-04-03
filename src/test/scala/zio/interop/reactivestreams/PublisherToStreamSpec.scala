@@ -21,7 +21,7 @@ import zio.stream.Stream
 import zio.test.Assertion._
 import zio.test._
 
-object PublisherToStreamSpec extends DefaultRunnableSpec {
+object PublisherToStreamSpec extends ZIOSpecDefault {
 
   override def spec =
     suite("Converting a `Publisher` to a `Stream`")(

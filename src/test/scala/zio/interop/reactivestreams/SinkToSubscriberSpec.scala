@@ -9,7 +9,7 @@ import zio.stream.{ Sink, ZSink }
 import zio.test.Assertion._
 import zio.test._
 
-object SinkToSubscriberSpec extends DefaultRunnableSpec {
+object SinkToSubscriberSpec extends ZIOSpecDefault {
   override def spec =
     suite("Converting a `Sink` to a `Subscriber`")(
       test("works on the happy path")(
