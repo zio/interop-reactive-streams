@@ -2,7 +2,7 @@ package zio.interop
 
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
-import zio.{ IO, Scope, UIO, ZIO, ZTraceElement }
+import zio.{ Scope, UIO, Task, ZIO, ZTraceElement }
 import zio.stream.ZSink
 import zio.stream.ZStream
 
