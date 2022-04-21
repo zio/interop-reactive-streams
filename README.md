@@ -5,7 +5,7 @@
 [![Releases][Badge-SonatypeReleases]][Link-SonatypeReleases]
 [![Snapshots][Badge-SonatypeSnapshots]][Link-SonatypeSnapshots]
 
-This library provides an interoperability layer for reactive streams.
+This library provides an interoperability layer between ZIO and reactive streams.
 
 ## Reactive Streams `Producer` and `Subscriber`
 
@@ -44,7 +44,7 @@ A `Publisher` used as a `Stream` buffers up to `qSize` elements. If possible, `q
 a power of two for best performance. The default is 16.
 
 ```scala mdoc
-val streamFromPublisher = publisher.toStream(qSize = 16)
+val streamFromPublisher = publisher.toZIOStream(qSize = 16)
 runtime.unsafeRun(
   streamFromPublisher.run(Sink.collectAll[Integer])
 )
@@ -53,15 +53,14 @@ runtime.unsafeRun(
 ### Subscriber to Sink
 
 When running a `Stream` to a `Subscriber`, a side channel is needed for signalling failures.
-For this reason `toSink` returns a tuple of `Promise` and `Sink`. The `Promise` must be failed
-on `Stream` failure. The type parameter on `toSink` is the error type of *the Stream*. 
+For this reason `toZIOSink` returns a tuple of a callback and a `Sink`. The callback must be used to signal `Stream` failure. The type parameter on `toZIOSink` is the error type of *the Stream*. 
 
 ```scala mdoc
-val asSink = subscriber.toSink[Throwable]
+val asSink = subscriber.toZIOSink[Throwable]
 val failingStream = Stream.range(3, 13) ++ Stream.fail(new RuntimeException("boom!"))
 runtime.unsafeRun(
-  asSink.use { case (errorP, sink) =>
-    failingStream.run(sink).catchAll(errorP.fail)
+  asSink.use { case (signalError, sink) =>
+    failingStream.run(sink).catchAll(signalError)
   }
 )
 ```
