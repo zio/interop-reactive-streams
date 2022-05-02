@@ -17,7 +17,7 @@ object SubscriberToSinkSpec extends ZIOSpecDefault {
         makeSubscriber.flatMap(probe =>
           ZIO.scoped[Any] {
             probe.underlying
-              .toSink[Throwable]
+              .toZIOSink[Throwable]
               .flatMap { case (_, sink) =>
                 for {
                   fiber      <- Stream.fromIterable(seq).run(sink).fork
@@ -34,7 +34,7 @@ object SubscriberToSinkSpec extends ZIOSpecDefault {
         makeSubscriber.flatMap(probe =>
           ZIO.scoped[Any] {
             probe.underlying
-              .toSink[Throwable]
+              .toZIOSink[Throwable]
               .flatMap { case (signalError, sink) =>
                 for {
                   fiber    <- (Stream.fromIterable(seq) ++ Stream.fail(e)).run(sink).catchAll(signalError).fork
@@ -51,7 +51,7 @@ object SubscriberToSinkSpec extends ZIOSpecDefault {
         makeSubscriber.flatMap(probe =>
           ZIO.scoped[Any] {
             probe.underlying
-              .toSink[Throwable]
+              .toZIOSink[Throwable]
               .flatMap { case (signalError, sink) =>
                 for {
                   _   <- ZStream.fail(e).run(sink).catchAll(signalError)
@@ -66,7 +66,7 @@ object SubscriberToSinkSpec extends ZIOSpecDefault {
           for {
             fiber <- ZIO.scoped {
                        probe.underlying
-                         .toSink[Throwable]
+                         .toZIOSink[Throwable]
                          .flatMap { case (signalError, sink) =>
                            ZStream.fail(e).run(sink).catchAll(signalError)
                          }
@@ -80,7 +80,7 @@ object SubscriberToSinkSpec extends ZIOSpecDefault {
         ZIO.scoped[Any] {
           for {
             probe              <- makeSubscriber
-            ses                <- probe.underlying.toSink
+            ses                <- probe.underlying.toZIOSink
             (signalError, sink) = ses
             _                  <- ZStream.fail(e).run(sink).catchAll(signalError)
             err                <- probe.expectError.exit
