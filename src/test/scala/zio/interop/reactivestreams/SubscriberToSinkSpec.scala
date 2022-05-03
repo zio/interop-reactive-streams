@@ -2,7 +2,7 @@ package zio.interop.reactivestreams
 
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualSubscriberWithSubscriptionSupport
-import zio.stream.{ Stream, ZStream }
+import zio.stream.ZStream
 import zio.test.Assertion._
 import zio.test.TestAspect.nonFlaky
 import zio.test._
@@ -20,7 +20,7 @@ object SubscriberToSinkSpec extends ZIOSpecDefault {
               .toZIOSink[Throwable]
               .flatMap { case (_, sink) =>
                 for {
-                  fiber      <- Stream.fromIterable(seq).run(sink).fork
+                  fiber      <- ZStream.fromIterable(seq).run(sink).fork
                   _          <- probe.request(length + 1)
                   elements   <- probe.nextElements(length).exit
                   completion <- probe.expectCompletion.exit
@@ -37,7 +37,7 @@ object SubscriberToSinkSpec extends ZIOSpecDefault {
               .toZIOSink[Throwable]
               .flatMap { case (signalError, sink) =>
                 for {
-                  fiber    <- (Stream.fromIterable(seq) ++ Stream.fail(e)).run(sink).catchAll(signalError).fork
+                  fiber    <- (ZStream.fromIterable(seq) ++ ZStream.fail(e)).run(sink).catchAll(signalError).fork
                   _        <- probe.request(length + 1)
                   elements <- probe.nextElements(length).exit
                   err      <- probe.expectError.exit

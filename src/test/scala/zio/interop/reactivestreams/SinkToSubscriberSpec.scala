@@ -5,7 +5,7 @@ import org.reactivestreams.tck.SubscriberWhiteboxVerification.{ SubscriberPuppet
 import org.reactivestreams.tck.{ SubscriberWhiteboxVerification, TestEnvironment }
 import org.testng.annotations.Test
 import zio.{ Chunk, Promise, ZIO, durationInt, durationLong }
-import zio.stream.{ Sink, ZSink }
+import zio.stream.ZSink
 import zio.test.Assertion._
 import zio.test._
 
@@ -25,14 +25,15 @@ object SinkToSubscriberSpec extends ZIOSpecDefault {
                          ZIO.succeed(publisher.subscribe(subscriber)) *> r
                        }
                    }.fork
+          _ <-
+            Live.live(
+              assertZIO(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).exit)(succeeds(isUnit))
+            )
           _ <- Live.live(
-                 assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).exit)(succeeds(isUnit))
+                 assertZIO(requested.await.timeoutFail("timeout awaiting request.")(500.millis).exit)(succeeds(isUnit))
                )
           _ <- Live.live(
-                 assertM(requested.await.timeoutFail("timeout awaiting request.")(500.millis).exit)(succeeds(isUnit))
-               )
-          _ <- Live.live(
-                 assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).exit)(succeeds(isUnit))
+                 assertZIO(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).exit)(succeeds(isUnit))
                )
           r <- fiber.join.exit
         } yield assert(r)(succeeds(equalTo(List(1, 2, 3, 4, 5))))
@@ -42,18 +43,18 @@ object SinkToSubscriberSpec extends ZIOSpecDefault {
           tuple                               <- makePublisherProbe
           (publisher, subscribed, _, canceled) = tuple
           fiber <- ZIO.scoped {
-                     Sink
+                     ZSink
                        .foreachChunk[Any, Throwable, Int](_ => ZIO.yieldNow)
                        .toSubscriber()
                        .flatMap { case (subscriber, _) => ZIO.succeed(publisher.subscribe(subscriber)) *> ZIO.never }
                    }.fork
           _ <-
             Live.live(
-              assertM(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).exit)(succeeds(isUnit))
+              assertZIO(subscribed.await.timeoutFail("timeout awaiting subscribe.")(500.millis).exit)(succeeds(isUnit))
             )
           _ <- fiber.interrupt
           _ <- Live.live(
-                 assertM(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).exit)(succeeds(isUnit))
+                 assertZIO(canceled.await.timeoutFail("timeout awaiting cancel.")(500.millis).exit)(succeeds(isUnit))
                )
           r <- fiber.join.exit
         } yield assert(r)(isInterrupted)
@@ -63,17 +64,17 @@ object SinkToSubscriberSpec extends ZIOSpecDefault {
           tuple                                       <- makePublisherProbe
           (publisher, subscribed, requested, canceled) = tuple
           fiber <- ZIO.scoped {
-                     Sink
+                     ZSink
                        .foreachChunk[Any, Throwable, Int](_ => ZIO.yieldNow)
                        .toSubscriber()
                        .flatMap { case (subscriber, _) =>
                          ZIO.attemptBlockingInterrupt(publisher.subscribe(subscriber)) *> ZIO.never
                        }
                    }.fork
-          _ <- assertM(subscribed.await.exit)(succeeds(isUnit))
-          _ <- assertM(requested.await.exit)(succeeds(isUnit))
+          _ <- assertZIO(subscribed.await.exit)(succeeds(isUnit))
+          _ <- assertZIO(requested.await.exit)(succeeds(isUnit))
           _ <- fiber.interrupt
-          _ <- assertM(canceled.await.exit)(succeeds(isUnit))
+          _ <- assertZIO(canceled.await.exit)(succeeds(isUnit))
           r <- fiber.join.exit
         } yield assert(r)(isInterrupted)
       ),
@@ -131,7 +132,7 @@ object SinkToSubscriberSpec extends ZIOSpecDefault {
 
   val managedVerification =
     for {
-      subscriber_    <- Sink.collectAll[Int].toSubscriber()
+      subscriber_    <- ZSink.collectAll[Int].toSubscriber()
       (subscriber, _) = subscriber_
       sbv <- ZIO.acquireRelease {
                val env = new TestEnvironment(1000, 500)

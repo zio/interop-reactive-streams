@@ -57,7 +57,7 @@ For this reason `toZIOSink` returns a tuple of a callback and a `Sink`. The call
 
 ```scala mdoc
 val asSink = subscriber.toZIOSink[Throwable]
-val failingStream = Stream.range(3, 13) ++ Stream.fail(new RuntimeException("boom!"))
+val failingStream = ZStream.range(3, 13) ++ ZStream.fail(new RuntimeException("boom!"))
 runtime.unsafeRun(
   asSink.use { case (signalError, sink) =>
     failingStream.run(sink).catchAll(signalError)
