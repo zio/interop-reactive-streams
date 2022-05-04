@@ -2,7 +2,7 @@ package zio.interop
 
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
-import zio.{ Scope, UIO, Task, ZIO, ZTraceElement }
+import zio.{ Scope, UIO, Task, ZIO, Trace }
 import zio.stream.ZSink
 import zio.stream.ZStream
 
@@ -13,7 +13,7 @@ package object reactivestreams {
     /** Create a `Publisher` from a `Stream`. Every time the `Publisher` is subscribed to, a new instance of the
       * `Stream` is run.
       */
-    def toPublisher(implicit trace: ZTraceElement): ZIO[R, Nothing, Publisher[O]] =
+    def toPublisher(implicit trace: Trace): ZIO[R, Nothing, Publisher[O]] =
       Adapters.streamToPublisher(stream)
   }
 
@@ -26,7 +26,7 @@ package object reactivestreams {
       *   The size used as internal buffer. If possible, set to a power of 2 value for best performance.
       */
     def toSubscriber(qSize: Int = 16)(implicit
-      trace: ZTraceElement
+      trace: Trace
     ): ZIO[R with Scope, Throwable, (Subscriber[A], Task[Z])] =
       Adapters.sinkToSubscriber(sink, qSize)
   }
@@ -37,7 +37,7 @@ package object reactivestreams {
       * @param qSize
       *   The size used as internal buffer. If possible, set to a power of 2 value for best performance.
       */
-    def toZIOStream(qSize: Int = 16)(implicit trace: ZTraceElement): ZStream[Any, Throwable, O] =
+    def toZIOStream(qSize: Int = 16)(implicit trace: Trace): ZStream[Any, Throwable, O] =
       Adapters.publisherToStream(publisher, qSize)
   }
 
@@ -54,7 +54,7 @@ package object reactivestreams {
       * ```
       */
     def toZIOSink[E <: Throwable](implicit
-      trace: ZTraceElement
+      trace: Trace
     ): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
   }

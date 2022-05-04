@@ -4,7 +4,7 @@ import org.reactivestreams.Publisher
 import org.reactivestreams.tck.{ PublisherVerification, TestEnvironment }
 import org.testng.annotations.Test
 import zio.ZIO
-import zio.stream.Stream
+import zio.stream.ZStream
 import zio.test.Assertion._
 import zio.test._
 
@@ -21,14 +21,14 @@ object StreamToPublisherSpec extends ZIOSpecDefault {
 
       def createPublisher(elements: Long): Publisher[Int] =
         runtime.unsafeRun(
-          Stream
+          ZStream
             .unfold(elements)(n => if (n > 0) Some((1, n - 1)) else None)
             .toPublisher
         )
 
       override def createFailedPublisher(): Publisher[Int] =
         runtime.unsafeRun(
-          Stream
+          ZStream
             .fail(new RuntimeException("boom!"))
             .map(_.asInstanceOf[Int])
             .toPublisher

@@ -9,15 +9,16 @@ import zio.Chunk
 import zio.Exit
 import zio.Fiber
 import zio.Promise
+import zio.Runtime
 import zio.Supervisor
 import zio.Task
 import zio.UIO
 import zio.ZEnvironment
 import zio.ZIO
-import zio.ZTraceElement
+import zio.Trace
 import zio.durationInt
-import zio.stream.Sink
-import zio.stream.Stream
+import zio.stream.ZSink
+import zio.stream.ZStream
 import zio.test.Assertion._
 import zio.test._
 
@@ -26,13 +27,13 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
   override def spec =
     suite("Converting a `Publisher` to a `Stream`")(
       test("works with a well behaved `Publisher`") {
-        assertM(publish(seq, None))(succeeds(equalTo(seq)))
+        assertZIO(publish(seq, None))(succeeds(equalTo(seq)))
       },
       test("fails with an initially failed `Publisher`") {
-        assertM(publish(Chunk.empty, Some(e)))(fails(equalTo(e)))
+        assertZIO(publish(Chunk.empty, Some(e)))(fails(equalTo(e)))
       },
       test("fails with an eventually failing `Publisher`") {
-        assertM(publish(seq, Some(e)))(fails(equalTo(e)))
+        assertZIO(publish(seq, Some(e)))(fails(equalTo(e)))
       },
       test("does not fail a fiber on failing `Publisher`") {
 
@@ -51,7 +52,7 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
 
             @transient var failedAFiber = false
 
-            def value(implicit trace: ZTraceElement): UIO[Boolean] =
+            def value(implicit trace: Trace): UIO[Boolean] =
               ZIO.succeed(failedAFiber)
 
             def unsafeOnStart[R, E, A](
@@ -67,24 +68,23 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
           }
 
         for {
-          outerRuntime <- ZIO.runtime[Any]
-          runtime       = outerRuntime.mapRuntimeConfig(_.copy(supervisor = supervisor))
-          exit         <- runtime.run(publisher.toZIOStream().runDrain.exit)
-          failed       <- supervisor.value
+          runtime <- Runtime.addSupervisor(supervisor).toRuntime
+          exit    <- runtime.run(publisher.toZIOStream().runDrain.exit)
+          failed  <- supervisor.value
         } yield assert(exit)(fails(anything)) && assert(failed)(isFalse)
 
       },
       test("does not freeze on stream end") {
         withProbe(probe =>
           for {
-            fiber <- Stream
+            fiber <- ZStream
                        .fromZIO(
                          ZIO.succeed(
                            probe.toZIOStream()
                          )
                        )
                        .flatMap(identity)
-                       .run(Sink.collectAll[Int])
+                       .run(ZSink.collectAll[Int])
                        .fork
             _ <- ZIO.attemptBlockingInterrupt(probe.expectRequest())
             _ <- ZIO.succeed(probe.sendNext(1))
@@ -112,11 +112,11 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
             _          <- ZIO.succeed(subscriber.onSubscribe(subscription))
             _          <- cancelledLatch.await
           } yield ()
-        assertM(tst.exit)(succeeds(anything))
+        assertZIO(tst.exit)(succeeds(anything))
       } @@ TestAspect.nonFlaky @@ TestAspect.timeout(60.seconds),
       test("cancels subscription when interrupted after subscription") {
         withProbe(probe =>
-          assertM((for {
+          assertZIO((for {
             fiber <- probe.toZIOStream(bufferSize).runDrain.fork
             _     <- ZIO.attemptBlockingInterrupt(probe.expectRequest())
             _     <- fiber.interrupt
@@ -128,7 +128,7 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
       } @@ TestAspect.nonFlaky @@ TestAspect.timeout(60.seconds),
       test("cancels subscription when interrupted during consumption") {
         withProbe(probe =>
-          assertM((for {
+          assertZIO((for {
             fiber  <- probe.toZIOStream(bufferSize).runDrain.fork
             demand <- ZIO.attemptBlockingInterrupt(probe.expectRequest())
             _      <- ZIO.attempt((1 to demand.toInt).foreach(i => probe.sendNext(i)))
@@ -141,7 +141,7 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
       } @@ TestAspect.nonFlaky @@ TestAspect.timeout(60.seconds),
       test("cancels subscription on stream end") {
         withProbe(probe =>
-          assertM((for {
+          assertZIO((for {
             fiber  <- probe.toZIOStream(bufferSize).take(1).runDrain.fork
             demand <- ZIO.attemptBlockingInterrupt(probe.expectRequest())
             _      <- ZIO.attempt((1 to demand.toInt).foreach(i => probe.sendNext(i)))
@@ -154,7 +154,7 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
       },
       test("cancels subscription on stream error") {
         withProbe(probe =>
-          assertM(for {
+          assertZIO(for {
             fiber  <- probe.toZIOStream(bufferSize).mapZIO(_ => ZIO.fail(new Throwable("boom!"))).runDrain.fork
             demand <- ZIO.attemptBlockingInterrupt(probe.expectRequest())
             _      <- ZIO.attempt((1 to demand.toInt).foreach(i => probe.sendNext(i)))
@@ -192,7 +192,7 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
     val faillable =
       withProbe(probe =>
         for {
-          fiber <- probe.toZIOStream(bufferSize).run(Sink.collectAll[Int]).fork
+          fiber <- probe.toZIOStream(bufferSize).run(ZSink.collectAll[Int]).fork
           _     <- loop(probe, seq)
           r     <- fiber.join
         } yield r

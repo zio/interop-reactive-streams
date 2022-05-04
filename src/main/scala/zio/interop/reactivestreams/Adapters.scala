@@ -15,7 +15,7 @@ object Adapters {
 
   def streamToPublisher[R, E <: Throwable, O](
     stream: => ZStream[R, E, O]
-  )(implicit trace: ZTraceElement): ZIO[R, Nothing, Publisher[O]] =
+  )(implicit trace: Trace): ZIO[R, Nothing, Publisher[O]] =
     ZIO.runtime.map { runtime => subscriber =>
       if (subscriber == null) {
         throw new NullPointerException("Subscriber must not be null.")
@@ -35,7 +35,7 @@ object Adapters {
 
   def subscriberToSink[E <: Throwable, I](
     subscriber: => Subscriber[I]
-  )(implicit trace: ZTraceElement): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] = {
+  )(implicit trace: Trace): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] = {
     val sub = subscriber
     for {
       error       <- Promise.make[E, Nothing]
@@ -48,7 +48,7 @@ object Adapters {
   def publisherToStream[O](
     publisher: => Publisher[O],
     bufferSize: => Int
-  )(implicit trace: ZTraceElement): ZStream[Any, Throwable, O] = {
+  )(implicit trace: Trace): ZStream[Any, Throwable, O] = {
 
     val pullOrFail =
       for {
@@ -66,7 +66,7 @@ object Adapters {
   def sinkToSubscriber[R, I, L, Z](
     sink: => ZSink[R, Throwable, I, L, Z],
     bufferSize: => Int
-  )(implicit trace: ZTraceElement): ZIO[R with Scope, Throwable, (Subscriber[I], IO[Throwable, Z])] =
+  )(implicit trace: Trace): ZIO[R with Scope, Throwable, (Subscriber[I], IO[Throwable, Z])] =
     for {
       subscriberP    <- makeSubscriber[I](bufferSize)
       (subscriber, p) = subscriberP
@@ -145,19 +145,19 @@ object Adapters {
 
           override def await(): IO[Option[Throwable], Unit] =
             done match {
-              case Some(value) => IO.fail(value)
+              case Some(value) => ZIO.fail(value)
               case None =>
                 val p = Promise.unsafeMake[Option[Throwable], Unit](FiberId.None)
                 toNotify = Some(p)
                 // An element has arrived in the meantime, we do not need to start waiting.
                 if (!q.isEmpty()) {
                   toNotify = None
-                  IO.unit
+                  ZIO.unit
                 } else
                   done.fold(p.await) { e =>
                     // The producer has canceled or errored in the meantime.
                     toNotify = None
-                    IO.fail(e)
+                    ZIO.fail(e)
                   }
             }
 
@@ -166,7 +166,7 @@ object Adapters {
           override def onSubscribe(s: Subscription): Unit =
             if (s == null) {
               val e = new NullPointerException("s was null in onSubscribe")
-              p.unsafeDone(IO.fail(e))
+              p.unsafeDone(ZIO.fail(e))
               throw e
             } else {
               val shouldCancel = isSubscribedOrInterrupted.getAndSet(true)
@@ -181,7 +181,7 @@ object Adapters {
               failNPE("t was null in onNext")
             } else {
               q.offer(t)
-              toNotify.foreach(_.unsafeDone(IO.unit))
+              toNotify.foreach(_.unsafeDone(ZIO.unit))
             }
 
           override def onError(e: Throwable): Unit =
@@ -192,7 +192,7 @@ object Adapters {
 
           override def onComplete(): Unit = {
             done = Some(None)
-            toNotify.foreach(_.unsafeDone(IO.fail(None)))
+            toNotify.foreach(_.unsafeDone(ZIO.fail(None)))
           }
 
           private def failNPE(msg: String) = {
@@ -203,7 +203,7 @@ object Adapters {
 
           private def fail(e: Throwable) = {
             done = Some(Some(e))
-            toNotify.foreach(_.unsafeDone(IO.fail(Some(e))))
+            toNotify.foreach(_.unsafeDone(ZIO.fail(Some(e))))
           }
 
         }
@@ -217,12 +217,12 @@ object Adapters {
   ): ZSink[Any, Nothing, I, I, Unit] =
     ZSink
       .foldChunksZIO[Any, Nothing, I, Boolean](true)(identity) { (_, chunk) =>
-        IO
+        ZIO
           .iterate(chunk)(!_.isEmpty) { chunk =>
             subscription
               .offer(chunk.size)
               .flatMap { acceptedCount =>
-                UIO
+                ZIO
                   .foreach(chunk.take(acceptedCount))(a => ZIO.succeed(subscriber.onNext(a)))
                   .as(chunk.drop(acceptedCount))
               }
@@ -252,7 +252,7 @@ object Adapters {
       var result: IO[Unit, Int] = null
       state.updateAndGet {
         case `canceled` =>
-          result = IO.fail(())
+          result = ZIO.fail(())
           canceled
         case State(0L, _) =>
           val p = Promise.unsafeMake[Unit, Int](FiberId.None)
@@ -261,7 +261,7 @@ object Adapters {
         case State(requestedCount, _) =>
           val newRequestedCount = Math.max(requestedCount - n, 0L)
           val accepted          = Math.min(requestedCount, n.toLong).toInt
-          result = IO.succeedNow(accepted)
+          result = ZIO.succeedNow(accepted)
           requested(newRequestedCount)
       }
       result
@@ -279,7 +279,7 @@ object Adapters {
           val newRequestedCount = requestedCount + n
           val accepted          = Math.min(offered.toLong, newRequestedCount)
           val remaining         = newRequestedCount - accepted
-          notification = () => toNotify.unsafeDone(IO.succeedNow(accepted.toInt))
+          notification = () => toNotify.unsafeDone(ZIO.succeedNow(accepted.toInt))
           requested(remaining)
         case State(requestedCount, _) if ((Long.MaxValue - n) > requestedCount) =>
           requested(requestedCount + n)
@@ -290,11 +290,11 @@ object Adapters {
     }
 
     override def cancel(): Unit =
-      state.getAndSet(canceled).toNotify.foreach { case (_, p) => p.unsafeDone(IO.fail(())) }
+      state.getAndSet(canceled).toNotify.foreach { case (_, p) => p.unsafeDone(ZIO.fail(())) }
   }
 
   private def fromPull[R, E, A](zio: ZIO[R with Scope, Nothing, ZIO[R, Option[E], Chunk[A]]])(implicit
-    trace: ZTraceElement
+    trace: Trace
   ): ZStream[R, E, A] =
     ZStream.unwrapScoped[R](zio.map(pull => ZStream.repeatZIOChunkOption(pull)))
 }
