@@ -130,6 +130,24 @@ object PublisherToStreamSpec extends DefaultRunnableSpec {
             fails(anything)
           )
         )
+      },
+      testM("ignores publisher calls after stream ending") {
+        withProbe(probe =>
+          assertM((for {
+            fiber  <- probe.toStream(bufferSize).runHead.fork
+            demand <- Task(probe.expectRequest())
+            _      <- Task(probe.sendNext(0))
+            _      <- Task(probe.expectCancelling())
+
+            _ <- Task((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+            _ <- Task(probe.sendCompletion())
+            _ <- Task(probe.sendError(e))
+
+            _ <- fiber.join
+          } yield ()).run)(
+            succeeds(isUnit)
+          )
+        )
       }
     )
 
