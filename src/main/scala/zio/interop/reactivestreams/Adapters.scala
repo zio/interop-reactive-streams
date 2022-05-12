@@ -137,7 +137,6 @@ object Adapters {
 
       val subscriber =
         new Subscriber[A] {
-
           override def onSubscribe(s: Subscription): Unit =
             if (s == null) {
               val e = new NullPointerException("s was null in onSubscribe")
@@ -154,7 +153,7 @@ object Adapters {
           override def onNext(t: A): Unit =
             if (t == null) {
               val e = new NullPointerException("t was null in onNext")
-              runtime.unsafeRun(q.offer(Exit.fail(Some(e))))
+              runtime.unsafeRunSync(q.offer(Exit.fail(Some(e))))
               throw e
             } else {
               runtime.unsafeRunSync(q.offer(Exit.succeed(t)))
@@ -164,14 +163,17 @@ object Adapters {
           override def onError(e: Throwable): Unit =
             if (e == null) {
               val e = new NullPointerException("t was null in onError")
-              runtime.unsafeRun(q.offer(Exit.fail(Some(e))))
+              runtime.unsafeRunSync(q.offer(Exit.fail(Some(e))))
               throw e
             } else {
-              runtime.unsafeRun(q.offer(Exit.fail(Some(e))).unit)
+              runtime.unsafeRunSync(q.offer(Exit.fail(Some(e))))
+              ()
             }
 
-          override def onComplete(): Unit =
-            runtime.unsafeRun(q.offer(Exit.fail(None)).unit)
+          override def onComplete(): Unit = {
+            runtime.unsafeRunSync(q.offer(Exit.fail(None)))
+            ()
+          }
         }
       (subscriber, p)
     }
