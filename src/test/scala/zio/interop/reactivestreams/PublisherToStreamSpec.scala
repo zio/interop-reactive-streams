@@ -162,6 +162,24 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
             exit   <- fiber.join.exit
           } yield exit)(fails(anything))
         )
+      },
+      test("ignores publisher calls after stream ending") {
+        withProbe(probe =>
+          assertZIO((for {
+            fiber  <- probe.toZIOStream(bufferSize).runHead.fork
+            demand <- ZIO.attemptBlockingInterrupt(probe.expectRequest())
+            _      <- ZIO.attempt(probe.sendNext(0))
+            _      <- ZIO.attemptBlockingInterrupt(probe.expectCancelling())
+
+            _ <- ZIO.attempt((1 to demand.toInt).foreach(i => probe.sendNext(i)))
+            _ <- ZIO.attempt(probe.sendCompletion())
+            _ <- ZIO.attempt(probe.sendError(e))
+
+            _ <- fiber.join
+          } yield ()).exit)(
+            succeeds(isUnit)
+          )
+        )
       }
     )
 
