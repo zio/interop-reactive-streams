@@ -33,6 +33,31 @@ object Adapters {
       }
     }
 
+  def zioToPublisher[R, E <: Throwable, O](
+    zio: => ZIO[R, E, O]
+  )(implicit trace: Trace): ZIO[R, Nothing, Publisher[O]] =
+    ZIO.runtime.map { runtime => subscriber =>
+      if (subscriber == null) {
+        throw new NullPointerException("Subscriber must not be null.")
+      } else {
+        val subscription = new DemandTrackingSubscription(subscriber)
+        runtime.unsafeRunAsync(
+          for {
+            _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
+            // Do we need to fork here (like in streamToPublisher, above)?
+            _ <- for {
+                   // the TCK requires that a failing publisher reports an error even before demand was signalled
+                   // -> run the value evaluation and offer in parallel
+                   // -> this has the added benefit that cancelling the subscription will interrupt an ongoing value evaluation
+                   o <- zio.tapError(e => ZIO.succeed(subscriber.onError(e))).mapError(_ => ()) <& subscription.offer(1)
+                   _ <- ZIO.succeed(subscriber.onNext(o))
+                   _ <- ZIO.succeed(subscriber.onComplete())
+                 } yield ()
+          } yield ()
+        )
+      }
+    }
+
   def subscriberToSink[E <: Throwable, I](
     subscriber: => Subscriber[I]
   )(implicit trace: Trace): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] = {

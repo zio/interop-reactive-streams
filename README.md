@@ -76,6 +76,19 @@ runtime.unsafeRun(
 )
 ```
 
+### ZIO to Publisher
+
+It is also possible to publish a single `ZIO`. In that case, the publisher emits at most one value.
+
+```scala mdoc
+val z = ZIO.succeed(1)
+runtime.unsafeRun(
+  z.toPublisher.flatMap { publisher =>
+    ZIO.succeed(publisher.subscribe(subscriber))
+  }
+)
+```
+
 ### Sink to Subscriber
 
 `toSubscriber` returns a `Subscriber` and an `IO` which completes with the result of running the 
