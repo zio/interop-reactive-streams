@@ -40,20 +40,10 @@ object Adapters {
       if (subscriber == null) {
         throw new NullPointerException("Subscriber must not be null.")
       } else {
-        val subscription = new DemandTrackingSubscription(subscriber)
         runtime.unsafeRunAsync(
-          for {
-            _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
-            // Do we need to fork here (like in streamToPublisher, above)?
-            _ <- for {
-                   // the TCK requires that a failing publisher reports an error even before demand was signalled
-                   // -> run the value evaluation and offer in parallel
-                   // -> this has the added benefit that cancelling the subscription will interrupt an ongoing value evaluation
-                   o <- zio.tapError(e => ZIO.succeed(subscriber.onError(e))).mapError(_ => ()) <& subscription.offer(1)
-                   _ <- ZIO.succeed(subscriber.onNext(o))
-                   _ <- ZIO.succeed(subscriber.onComplete())
-                 } yield ()
-          } yield ()
+          subscribeAndRun(subscriber)(consumer =>
+            (zio <& consumer.offer(1).debug("offered")).flatMap(o => ZIO.succeed(consumer.next(o)))
+          )
         )
       }
     }
@@ -317,6 +307,120 @@ object Adapters {
     override def cancel(): Unit =
       state.getAndSet(canceled).toNotify.foreach { case (_, p) => p.unsafeDone(ZIO.fail(())) }
   }
+
+  trait Consumer[-O] {
+
+    /** Offers a number of outputs.
+      *
+      * @param n
+      *   The number of offered elements; must be > 0
+      * @return
+      *   Returns the accepted number elements which is in the range 0 < accepted <= n. The `next` method must be called
+      *   exactly the accepted number of times before `offer` is called the next time.
+      */
+    def offer(n: Int): Task[Int]
+
+    /** Signals the next output.
+      * @param o
+      */
+    def next(o: O): Unit
+  }
+
+  private class ConsumerImpl[-O](subscriber: Subscriber[O]) extends Consumer[O] {
+    import ConsumerImpl._
+
+    val state = new AtomicReference(Requesting(0): State)
+
+    override def offer(n: Int): Task[Int] = n match {
+      case n if n > 0 =>
+        var result: () => Task[Int] = null
+        state.updateAndGet {
+          case Requesting(r) if r > 0 =>
+            val accepted = Math.min(n.toLong, r)
+            result = () => ZIO.succeedNow(accepted.toInt)
+            Requesting(r - accepted)
+          case Requesting(_) =>
+            val p = Promise.unsafeMake[Throwable, Int](FiberId.None)
+            result = () => p.await
+            Offering(n, p)
+          case state @ Offering(o, previousOfferPromise) =>
+            // we are already offering and get another offer
+            // -> reject the offer an keep the current state
+            result = () => ZIO.fail(new IllegalStateException(""))
+            state
+        }
+        result()
+      case _ =>
+        ZIO.fail(new IllegalArgumentException(s"offer must be greater than 0 - offer: $n"))
+    }
+
+    def request(n: Long): Unit = {
+      if (n <= 0) subscriber.onError(new IllegalArgumentException("non-positive subscription request"))
+      var notification: () => Unit = () => ()
+      state.getAndUpdate {
+        case Requesting(r) =>
+          notification = () => ()
+          if (Long.MaxValue - n > r) {
+            Requesting(r + n)
+          } else {
+            Requesting(Long.MaxValue)
+          }
+        case Offering(o, p) =>
+          val accepted = Math.min(n, o.toLong)
+          notification = () => p.unsafeDone(ZIO.succeedNow(accepted.toInt))
+          Requesting(n - accepted)
+      }
+      notification()
+    }
+
+    override def next(o: O): Unit = subscriber.onNext(o)
+
+    def cancel(): Unit =
+      state.get() match {
+//        case Offering(_, p) => p.unsafeDone(ZIO.fail(new Exception("cancelled")))
+        case _ =>
+      }
+  }
+
+  object ConsumerImpl {
+    val zero = ZIO.succeedNow(0)
+
+    sealed trait State
+    case class Requesting(n: Long)                          extends State
+    case class Offering(n: Int, p: Promise[Throwable, Int]) extends State
+  }
+
+  def subscribeAndRun[R, O](subscriber: Subscriber[O])(
+    run: Consumer[O] => RIO[R, Unit]
+  ): ZIO[R, Throwable, Unit] =
+    for {
+      consumer <- ZIO.succeed(new ConsumerImpl(subscriber))
+
+      fiber <- run(consumer)
+                 .tapBoth(
+                   e => ZIO.succeed(subscriber.onError(e)).debug("r2"),
+                   _ => ZIO.succeed(subscriber.onComplete()).debug("r3")
+                 )
+                 .fork
+
+      runtime <- ZIO.runtime[R]
+
+      subscription = new Subscription {
+                       override def request(n: Long): Unit = consumer.request(n)
+
+                       override def cancel(): Unit =
+                         try {
+                           // consumer.cancel() // allows to propagate cancellation to pending offers
+                           runtime.unsafeRun(fiber.interrupt.debug("interrupted").fork.debug("forkedInterruped").unit)
+                         } catch {
+                           case t: Throwable => t.printStackTrace(); throw t
+                         }
+                     }
+
+      _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
+    } yield {
+      ()
+    }
 
   private def fromPull[R, E, A](zio: ZIO[R with Scope, Nothing, ZIO[R, Option[E], Chunk[A]]])(implicit
     trace: Trace

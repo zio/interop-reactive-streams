@@ -1,11 +1,11 @@
 package zio.interop.reactivestreams
 
-import org.reactivestreams.Publisher
+import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import org.reactivestreams.tck.PublisherVerification.PublisherTestRun
 import org.reactivestreams.tck.{ PublisherVerification, TestEnvironment }
 import org.testng.SkipException
 import org.testng.annotations.Test
-import zio.ZIO
+import zio.{ Promise, ZIO }
 import zio.test.Assertion._
 import zio.test._
 
@@ -14,7 +14,28 @@ import java.lang.reflect.InvocationTargetException
 object ZioToPublisherSpec extends ZIOSpecDefault {
   override def spec =
     suite("Converting a `ZIO` to a `Publisher`")(
-      suite("passes all required and optional TCK tests that are applicable to streams of length 1")(tests: _*)
+      suite("passes all required and optional TCK tests that are applicable to streams of length 1")(tests: _*),
+      test("interrupts evaluation on cancellation") {
+        for {
+          interruptedPromise  <- Promise.make[Nothing, Unit]
+          subscriptionPromise <- Promise.make[Nothing, Subscription]
+          z                    = ZIO.never.as(0).onInterrupt(interruptedPromise.complete(ZIO.succeed(())))
+          publisher           <- z.toPublisher
+          subscriber = new Subscriber[Int] {
+                         override def onSubscribe(s: Subscription): Unit =
+                           subscriptionPromise.unsafeDone(ZIO.succeed(s))
+                         override def onNext(t: Int): Unit        = ???
+                         override def onError(t: Throwable): Unit = ???
+                         override def onComplete(): Unit          = ???
+                       }
+          _            <- ZIO.succeed(publisher.subscribe(subscriber))
+          subscription <- subscriptionPromise.await
+          _            <- ZIO.succeed(subscription.cancel())
+          unit         <- interruptedPromise.await
+        } yield {
+          assert(unit)(equalTo(()))
+        }
+      }
     )
 
   def makePV(runtime: zio.Runtime[Any]) =
