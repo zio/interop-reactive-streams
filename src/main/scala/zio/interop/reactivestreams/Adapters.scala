@@ -35,14 +35,15 @@ object Adapters {
 
   def zioToPublisher[R, E <: Throwable, O](
     zio: => ZIO[R, E, O]
-  )(implicit trace: Trace): ZIO[R, Nothing, Publisher[O]] =
+  )(implicit trace: Trace): URIO[R, Publisher[O]] =
     ZIO.runtime.map { runtime => subscriber =>
       if (subscriber == null) {
         throw new NullPointerException("Subscriber must not be null.")
       } else {
         runtime.unsafeRunAsync(
           subscribeAndRun(subscriber)(consumer =>
-            (zio <& consumer.offer(1).debug("offered")).flatMap(o => ZIO.succeed(consumer.next(o)))
+            // Use <* instead of <& for now (cf. https://github.com/zio/zio/issues/6888)
+            (zio <* consumer.offer(1)).flatMap(o => ZIO.succeed(consumer.next(o)))
           )
         )
       }
@@ -345,7 +346,7 @@ object Adapters {
             Offering(n, p)
           case state @ Offering(o, previousOfferPromise) =>
             // we are already offering and get another offer
-            // -> reject the offer an keep the current state
+            // -> reject the offer and keep the current state
             result = () => ZIO.fail(new IllegalStateException(""))
             state
         }
@@ -374,12 +375,6 @@ object Adapters {
     }
 
     override def next(o: O): Unit = subscriber.onNext(o)
-
-    def cancel(): Unit =
-      state.get() match {
-//        case Offering(_, p) => p.unsafeDone(ZIO.fail(new Exception("cancelled")))
-        case _ =>
-      }
   }
 
   object ConsumerImpl {
@@ -392,16 +387,16 @@ object Adapters {
 
   def subscribeAndRun[R, O](subscriber: Subscriber[O])(
     run: Consumer[O] => RIO[R, Unit]
-  ): ZIO[R, Throwable, Unit] =
+  ): URIO[R, Unit] =
     for {
       consumer <- ZIO.succeed(new ConsumerImpl(subscriber))
 
       fiber <- run(consumer)
                  .tapBoth(
-                   e => ZIO.succeed(subscriber.onError(e)).debug("r2"),
-                   _ => ZIO.succeed(subscriber.onComplete()).debug("r3")
+                   e => ZIO.succeed(subscriber.onError(e)),
+                   _ => ZIO.succeed(subscriber.onComplete())
                  )
-                 .fork
+                 .forkDaemon
 
       runtime <- ZIO.runtime[R]
 
@@ -409,12 +404,7 @@ object Adapters {
                        override def request(n: Long): Unit = consumer.request(n)
 
                        override def cancel(): Unit =
-                         try {
-                           // consumer.cancel() // allows to propagate cancellation to pending offers
-                           runtime.unsafeRun(fiber.interrupt.debug("interrupted").fork.debug("forkedInterruped").unit)
-                         } catch {
-                           case t: Throwable => t.printStackTrace(); throw t
-                         }
+                         runtime.unsafeRunAsync(fiber.interrupt)
                      }
 
       _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
