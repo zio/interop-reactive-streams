@@ -341,7 +341,7 @@ object Adapters {
             result = () => ZIO.succeedNow(accepted.toInt)
             Requesting(r - accepted)
           case Requesting(_) =>
-            val p = Promise.unsafeMake[Throwable, Int](FiberId.None)
+            val p = Promise.unsafeMake[Nothing, Int](FiberId.None)
             result = () => p.await
             Offering(n, p)
           case state @ Offering(o, previousOfferPromise) =>
@@ -379,8 +379,8 @@ object Adapters {
 
   object ConsumerImpl {
     sealed trait State
-    case class Requesting(n: Long)                          extends State
-    case class Offering(n: Int, p: Promise[Throwable, Int]) extends State
+    case class Requesting(n: Long)                        extends State
+    case class Offering(n: Int, p: Promise[Nothing, Int]) extends State
   }
 
   def subscribeAndRun[R, O](subscriber: Subscriber[O])(
