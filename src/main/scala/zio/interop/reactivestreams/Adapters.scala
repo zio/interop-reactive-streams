@@ -347,7 +347,7 @@ object Adapters {
           case state @ Offering(o, previousOfferPromise) =>
             // we are already offering and get another offer
             // -> reject the offer and keep the current state
-            result = () => ZIO.fail(new IllegalStateException(""))
+            result = () => ZIO.fail(new IllegalStateException("There is already an outstanding offer"))
             state
         }
         result()
