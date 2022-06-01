@@ -378,8 +378,6 @@ object Adapters {
   }
 
   object ConsumerImpl {
-    val zero = ZIO.succeedNow(0)
-
     sealed trait State
     case class Requesting(n: Long)                          extends State
     case class Offering(n: Int, p: Promise[Throwable, Int]) extends State
