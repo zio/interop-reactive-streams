@@ -33,6 +33,29 @@ object Adapters {
       }
     }
 
+  def streamToPublisher2[R, E <: Throwable, O](
+    stream: => ZStream[R, E, O]
+  )(implicit trace: Trace): ZIO[R, Nothing, Publisher[O]] =
+    ZIO.runtime.map { runtime => subscriber =>
+      if (subscriber == null) {
+        throw new NullPointerException("Subscriber must not be null.")
+      } else {
+        runtime.unsafeRunAsync(
+          subscribeAndRun(subscriber) { consumer =>
+            stream.runForeachChunk { chunk =>
+              ZIO.iterate(chunk)(!_.isEmpty) { chunk =>
+                consumer.offer(chunk.size).flatMap { acceptedCount =>
+                  ZIO
+                    .foreach(chunk.take(acceptedCount))(a => ZIO.succeed(consumer.next(a)))
+                    .as(chunk.drop(acceptedCount))
+                }
+              }
+            }
+          }
+        )
+      }
+    }
+
   def zioToPublisher[R, E <: Throwable, O](
     zio: => ZIO[R, E, O]
   )(implicit trace: Trace): URIO[R, Publisher[O]] =
@@ -46,6 +69,50 @@ object Adapters {
             (zio <* consumer.offer(1)).flatMap(o => ZIO.succeed(consumer.next(o)))
           )
         )
+      }
+    }
+
+  def zioToPublisher2[R, E <: Throwable, O](
+    zio: => ZIO[R, E, O]
+  )(implicit trace: Trace): URIO[R, Publisher[O]] =
+    ZIO.runtime.map { runtime => subscriber =>
+      if (subscriber == null) {
+        throw new NullPointerException("Subscriber must not be null.")
+      } else {
+        val cancellationHookRef = new AtomicReference[FiberId => Exit[Any, Unit]]
+
+        val subscription = new Subscription {
+
+          override def cancel(): Unit = {
+            val hook = cancellationHookRef.compareAndExchange(null, _ => Exit.interrupt(FiberId.None))
+            if (hook != null) {
+              hook(FiberId.None)
+              ()
+            }
+          }
+
+          override def request(n: Long): Unit =
+            if (n <= 0) throw new RuntimeException("demand must be > 0")
+            else {
+              if (cancellationHookRef.get == null) {
+                val latch = Promise.unsafeMake[Unit, Unit](FiberId.None)
+                val hook =
+                  runtime.unsafeRunAsyncCancelable(
+                    latch.await *>
+                      zio
+                        .foldZIO(
+                          e => ZIO.succeed(subscriber.onError(e)),
+                          a => ZIO.succeed(subscriber.onNext(a)) *> ZIO.succeed(subscriber.onComplete())
+                        )
+                  )(_ => ())
+                if (cancellationHookRef.compareAndSet(null, hook)) latch.unsafeDone(ZIO.succeedNow(()))
+                else latch.unsafeDone(ZIO.fail(()))
+              }
+            }
+
+        }
+
+        subscriber.onSubscribe(subscription)
       }
     }
 
