@@ -8,6 +8,7 @@ import zio.internal.RingBuffer
 import zio.stream._
 import zio.stream.ZStream.Pull
 
+import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -42,15 +43,7 @@ object Adapters {
       } else {
         runtime.unsafeRunAsync(
           subscribeAndRun(subscriber) { consumer =>
-            stream.runForeachChunk { chunk =>
-              ZIO.iterate(chunk)(!_.isEmpty) { chunk =>
-                consumer.offer(chunk.size).flatMap { acceptedCount =>
-                  ZIO
-                    .foreach(chunk.take(acceptedCount))(a => ZIO.succeed(consumer.next(a)))
-                    .as(chunk.drop(acceptedCount))
-                }
-              }
-            }
+            stream.runForeachChunk(processChunk(consumer, _))
           }
         )
       }
@@ -127,6 +120,52 @@ object Adapters {
       fiber       <- error.await.catchAll(t => ZIO.succeed(sub.onError(t))).forkScoped
     } yield (error.fail(_) *> fiber.join, demandUnfoldSink(sub, subscription))
   }
+
+  def subscriberToChannel[I](
+    subscriber: => Subscriber[I]
+  )(implicit trace: Trace): ZIO[Any, Nothing, ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any]] =
+    for {
+      subscriber          <- ZIO.succeed(subscriber)
+      consumer            <- ZIO.succeed(new ConsumerImpl(subscriber))
+      cancellationPromise <- Promise.make[Throwable, Any]
+
+      subscription = new Subscription {
+                       override def request(n: Long): Unit = consumer.request(n)
+                       override def cancel(): Unit =
+                         cancellationPromise.unsafeDone(
+                           ZIO.fail(new CancellationException("Subscription was cancelled"))
+                         )
+                     }
+
+      _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
+
+    } yield {
+
+      lazy val process: ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any] =
+        ZChannel
+          .readWithCause[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any](
+            in => ZChannel.fromZIO(processChunk(consumer, in)) *> process,
+            halt => {
+              val throwable = halt.dieOption match {
+                case Some(throwable) => throwable
+                case _ =>
+                  halt.failureOption match {
+                    case Some(throwable) => throwable
+                    case _               => new InterruptedException("ZChannel was interrupted")
+                  }
+              }
+              subscriber.onError(throwable)
+              ZChannel.failCause(halt)
+            },
+            _ => {
+              subscriber.onComplete()
+              ZChannel.succeed(())
+            }
+          )
+          .interruptWhen(cancellationPromise)
+
+      process
+    }
 
   def publisherToStream[O](
     publisher: => Publisher[O],
@@ -476,6 +515,16 @@ object Adapters {
     } yield {
       ()
     }
+
+  def processChunk[I](consumer: Consumer[I], chunk: Chunk[I]): Task[Unit] = ZIO
+    .iterate(chunk)(!_.isEmpty) { chunk =>
+      consumer.offer(chunk.size).flatMap { acceptedCount =>
+        ZIO
+          .foreach(chunk.take(acceptedCount))(a => ZIO.succeed(consumer.next(a)))
+          .as(chunk.drop(acceptedCount))
+      }
+    }
+    .unit
 
   private def fromPull[R, E, A](zio: ZIO[R with Scope, Nothing, ZIO[R, Option[E], Chunk[A]]])(implicit
     trace: Trace
