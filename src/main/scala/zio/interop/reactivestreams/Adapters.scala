@@ -8,6 +8,7 @@ import zio.internal.RingBuffer
 import zio.stream._
 import zio.stream.ZStream.Pull
 
+import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
@@ -33,6 +34,81 @@ object Adapters {
       }
     }
 
+  def streamToPublisher2[R, E <: Throwable, O](
+    stream: => ZStream[R, E, O]
+  )(implicit trace: Trace): ZIO[R, Nothing, Publisher[O]] =
+    ZIO.runtime.map { runtime => subscriber =>
+      if (subscriber == null) {
+        throw new NullPointerException("Subscriber must not be null.")
+      } else {
+        runtime.unsafeRunAsync(
+          subscribeAndRun(subscriber) { consumer =>
+            stream.runForeachChunk(processChunk(consumer, _))
+          }
+        )
+      }
+    }
+
+  def zioToPublisher[R, E <: Throwable, O](
+    zio: => ZIO[R, E, O]
+  )(implicit trace: Trace): URIO[R, Publisher[O]] =
+    ZIO.runtime.map { runtime => subscriber =>
+      if (subscriber == null) {
+        throw new NullPointerException("Subscriber must not be null.")
+      } else {
+        runtime.unsafeRunAsync(
+          subscribeAndRun(subscriber)(consumer =>
+            // Use <* instead of <& for now (cf. https://github.com/zio/zio/issues/6888)
+            (zio <* consumer.offer(1)).flatMap(o => ZIO.succeed(consumer.next(o)))
+          )
+        )
+      }
+    }
+
+  def zioToPublisher2[R, E <: Throwable, O](
+    zio: => ZIO[R, E, O]
+  )(implicit trace: Trace): URIO[R, Publisher[O]] =
+    ZIO.runtime.map { runtime => subscriber =>
+      if (subscriber == null) {
+        throw new NullPointerException("Subscriber must not be null.")
+      } else {
+        val cancellationHookRef = new AtomicReference[FiberId => Exit[Any, Unit]]
+
+        val subscription = new Subscription {
+
+          override def cancel(): Unit = {
+            val hook = cancellationHookRef.compareAndExchange(null, _ => Exit.interrupt(FiberId.None))
+            if (hook != null) {
+              hook(FiberId.None)
+              ()
+            }
+          }
+
+          override def request(n: Long): Unit =
+            if (n <= 0) throw new RuntimeException("demand must be > 0")
+            else {
+              if (cancellationHookRef.get == null) {
+                val latch = Promise.unsafeMake[Unit, Unit](FiberId.None)
+                val hook =
+                  runtime.unsafeRunAsyncCancelable(
+                    latch.await *>
+                      zio
+                        .foldZIO(
+                          e => ZIO.succeed(subscriber.onError(e)),
+                          a => ZIO.succeed(subscriber.onNext(a)) *> ZIO.succeed(subscriber.onComplete())
+                        )
+                  )(_ => ())
+                if (cancellationHookRef.compareAndSet(null, hook)) latch.unsafeDone(ZIO.succeedNow(()))
+                else latch.unsafeDone(ZIO.fail(()))
+              }
+            }
+
+        }
+
+        subscriber.onSubscribe(subscription)
+      }
+    }
+
   def subscriberToSink[E <: Throwable, I](
     subscriber: => Subscriber[I]
   )(implicit trace: Trace): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] = {
@@ -44,6 +120,52 @@ object Adapters {
       fiber       <- error.await.catchAll(t => ZIO.succeed(sub.onError(t))).forkScoped
     } yield (error.fail(_) *> fiber.join, demandUnfoldSink(sub, subscription))
   }
+
+  def subscriberToChannel[I](
+    subscriber: => Subscriber[I]
+  )(implicit trace: Trace): UIO[ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any]] =
+    for {
+      subscriber          <- ZIO.succeed(subscriber)
+      consumer            <- ZIO.succeed(new ConsumerImpl(subscriber))
+      cancellationPromise <- Promise.make[Throwable, Any]
+
+      subscription = new Subscription {
+                       override def request(n: Long): Unit = consumer.request(n)
+                       override def cancel(): Unit =
+                         cancellationPromise.unsafeDone(
+                           ZIO.fail(new CancellationException("Subscription was cancelled"))
+                         )
+                     }
+
+      _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
+
+    } yield {
+
+      lazy val process: ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any] =
+        ZChannel
+          .readWithCause[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any](
+            in => ZChannel.fromZIO(processChunk(consumer, in)) *> process,
+            halt => {
+              val throwable = halt.dieOption match {
+                case Some(throwable) => throwable
+                case _ =>
+                  halt.failureOption match {
+                    case Some(throwable) => throwable
+                    case _               => new InterruptedException("ZChannel was interrupted")
+                  }
+              }
+              subscriber.onError(throwable)
+              ZChannel.failCause(halt)
+            },
+            _ => {
+              subscriber.onComplete()
+              ZChannel.succeed(())
+            }
+          )
+          .interruptWhen(cancellationPromise)
+
+      process
+    }
 
   def publisherToStream[O](
     publisher: => Publisher[O],
@@ -292,6 +414,117 @@ object Adapters {
     override def cancel(): Unit =
       state.getAndSet(canceled).toNotify.foreach { case (_, p) => p.unsafeDone(ZIO.fail(())) }
   }
+
+  trait Consumer[-O] {
+
+    /** Offers a number of outputs.
+      *
+      * @param n
+      *   The number of offered elements; must be > 0
+      * @return
+      *   Returns the accepted number elements which is in the range 0 < accepted <= n. The `next` method must be called
+      *   exactly the accepted number of times before `offer` is called the next time.
+      */
+    def offer(n: Int): Task[Int]
+
+    /** Signals the next output.
+      * @param o
+      */
+    def next(o: O): Unit
+  }
+
+  private class ConsumerImpl[-O](subscriber: Subscriber[O]) extends Consumer[O] {
+    import ConsumerImpl._
+
+    val state = new AtomicReference(Requesting(0): State)
+
+    override def offer(n: Int): Task[Int] = n match {
+      case n if n > 0 =>
+        var result: () => Task[Int] = null
+        state.updateAndGet {
+          case Requesting(r) if r > 0 =>
+            val accepted = Math.min(n.toLong, r)
+            result = () => ZIO.succeedNow(accepted.toInt)
+            Requesting(r - accepted)
+          case Requesting(_) =>
+            val p = Promise.unsafeMake[Nothing, Int](FiberId.None)
+            result = () => p.await
+            Offering(n, p)
+          case state @ Offering(o, previousOfferPromise) =>
+            // we are already offering and get another offer
+            // -> reject the offer and keep the current state
+            result = () => ZIO.fail(new IllegalStateException("There is already an outstanding offer"))
+            state
+        }
+        result()
+      case _ =>
+        ZIO.fail(new IllegalArgumentException(s"offer must be greater than 0 - offer: $n"))
+    }
+
+    def request(n: Long): Unit = {
+      if (n <= 0) subscriber.onError(new IllegalArgumentException("non-positive subscription request"))
+      var notification: () => Unit = () => ()
+      state.getAndUpdate {
+        case Requesting(r) =>
+          notification = () => ()
+          if (Long.MaxValue - n > r) {
+            Requesting(r + n)
+          } else {
+            Requesting(Long.MaxValue)
+          }
+        case Offering(o, p) =>
+          val accepted = Math.min(n, o.toLong)
+          notification = () => p.unsafeDone(ZIO.succeedNow(accepted.toInt))
+          Requesting(n - accepted)
+      }
+      notification()
+    }
+
+    override def next(o: O): Unit = subscriber.onNext(o)
+  }
+
+  object ConsumerImpl {
+    sealed trait State
+    case class Requesting(n: Long)                        extends State
+    case class Offering(n: Int, p: Promise[Nothing, Int]) extends State
+  }
+
+  def subscribeAndRun[R, O](subscriber: Subscriber[O])(
+    run: Consumer[O] => RIO[R, Unit]
+  ): URIO[R, Unit] =
+    for {
+      consumer <- ZIO.succeed(new ConsumerImpl(subscriber))
+
+      fiber <- run(consumer)
+                 .tapBoth(
+                   e => ZIO.succeed(subscriber.onError(e)),
+                   _ => ZIO.succeed(subscriber.onComplete())
+                 )
+                 .forkDaemon
+
+      runtime <- ZIO.runtime[R]
+
+      subscription = new Subscription {
+                       override def request(n: Long): Unit = consumer.request(n)
+
+                       override def cancel(): Unit =
+                         runtime.unsafeRunAsync(fiber.interrupt)
+                     }
+
+      _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
+    } yield {
+      ()
+    }
+
+  def processChunk[I](consumer: Consumer[I], chunk: Chunk[I]): Task[Unit] = ZIO
+    .iterate(chunk)(!_.isEmpty) { chunk =>
+      consumer.offer(chunk.size).flatMap { acceptedCount =>
+        ZIO
+          .foreach(chunk.take(acceptedCount))(a => ZIO.succeed(consumer.next(a)))
+          .as(chunk.drop(acceptedCount))
+      }
+    }
+    .unit
 
   private def fromPull[R, E, A](zio: ZIO[R with Scope, Nothing, ZIO[R, Option[E], Chunk[A]]])(implicit
     trace: Trace

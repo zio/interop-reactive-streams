@@ -2,9 +2,8 @@ package zio.interop
 
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
-import zio.{ Scope, UIO, Task, ZIO, Trace }
-import zio.stream.ZSink
-import zio.stream.ZStream
+import zio.{ Chunk, Scope, Task, Trace, UIO, ZIO }
+import zio.stream.{ ZChannel, ZSink, ZStream }
 
 package object reactivestreams {
 
@@ -15,6 +14,14 @@ package object reactivestreams {
       */
     def toPublisher(implicit trace: Trace): ZIO[R, Nothing, Publisher[O]] =
       Adapters.streamToPublisher(stream)
+  }
+
+  /** Creates a `Publisher` from a `ZIO` that publishes the ZIO's value. Every time the `Publisher` is subscribed to, a
+    * new instance of the `ZIO` is run.
+    */
+  final implicit class zioToPublisher[R, E <: Throwable, O](private val zio: ZIO[R, E, O]) extends AnyVal {
+    def toPublisher(implicit trace: Trace): ZIO[R, Nothing, Publisher[O]] =
+      Adapters.zioToPublisher(zio)
   }
 
   final implicit class sinkToSubscriber[R, E <: Throwable, A, L, Z](private val sink: ZSink[R, E, A, L, Z]) {
@@ -57,6 +64,11 @@ package object reactivestreams {
       trace: Trace
     ): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
+
+    def toZIOChannel(implicit
+      trace: Trace
+    ): UIO[ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any]] =
+      Adapters.subscriberToChannel(subscriber)
   }
 
 }
