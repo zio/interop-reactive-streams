@@ -37,7 +37,7 @@ addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
 
 val zioVersion        = "1.0.15"
-val rsVersion         = "1.0.3"
+val rsVersion         = "1.0.4"
 val collCompatVersion = "2.5.0"
 
 lazy val interopReactiveStreams = project
