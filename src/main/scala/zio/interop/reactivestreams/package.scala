@@ -67,7 +67,7 @@ package object reactivestreams {
 
     def toZIOChannel(implicit
       trace: Trace
-    ): ZIO[Scope, Nothing, ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any]] =
+    ): UIO[ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any]] =
       Adapters.subscriberToChannel(subscriber)
   }
 

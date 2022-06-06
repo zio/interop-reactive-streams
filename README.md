@@ -9,9 +9,18 @@ This library provides an interoperability layer between ZIO and reactive streams
 
 ## Reactive Streams `Producer` and `Subscriber`
 
-**ZIO** integrates with [Reactive Streams](http://reactivestreams.org) by providing conversions from `zio.stream.Stream` to `org.reactivestreams.Publisher`
-and from `zio.stream.Sink` to `org.reactivestreams.Subscriber` and vice versa. Simply import `import zio.interop.reactivestreams._` to make the
-conversions available.
+**ZIO** integrates with [Reactive Streams](http://reactivestreams.org) by providing various conversions:
+
+| from | to                               |
+| :--- |:---------------------------------|
+| `zio.stream.ZStream` | `org.reactivestreams.Publisher`  |
+| `zio.ZIO` | `org.reactivestreams.Publisher`  |
+| `zio.stream.Sink` | `org.reactivestreams.Subscriber` |
+| `org.reactivestreams.Publisher` | `zio.stream.ZStream`             |
+| `org.reactivestreams.Subscriber` | `zio.stream.ZSink`               |
+| `org.reactivestreams.Subscriber` | `zio.stream.ZChannel`            |
+
+Simply import `import zio.interop.reactivestreams._` to make the conversions available.
 
 ## Examples
 
@@ -23,7 +32,7 @@ import zio._
 import zio.interop.reactivestreams._
 import zio.stream._
 
-val runtime = new DefaultRuntime {}
+val runtime = Runtime.default
 ```
 
 We use the following `Publisher` and `Subscriber` for the examples: 
@@ -64,6 +73,25 @@ runtime.unsafeRun(
   }
 )
 ```
+
+### Subscriber to Channel
+
+A `Subscriber` can be converted into a `ZChannel` that supports `Throwable` as input error. Converting a `Subscriber` into a `ZChannel` may be convenient if the input `ZStream` can output throwables. In that case, no additional side channel for signalling failures is needed.
+
+```scala mdoc
+val asChannel = subscriber.toZIOChannel
+val stream    = ZStream.range(3, 13) ++ ZStream.fail(new Exception("boom"))
+
+val exit = runtime.unsafeRun(
+  asChannel.flatMap { channel =>
+    stream.pipeThroughChannel(channel).runDrain.exit
+  }
+)
+println(exit)
+
+An exception is passed to `Subscriber.onError` and is also reflected in the exit value when running the stream.
+```
+
 
 ### Stream to Publisher
 

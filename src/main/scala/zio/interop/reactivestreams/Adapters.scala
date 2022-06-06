@@ -123,7 +123,7 @@ object Adapters {
 
   def subscriberToChannel[I](
     subscriber: => Subscriber[I]
-  )(implicit trace: Trace): ZIO[Any, Nothing, ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any]] =
+  )(implicit trace: Trace): UIO[ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[Unit], Any]] =
     for {
       subscriber          <- ZIO.succeed(subscriber)
       consumer            <- ZIO.succeed(new ConsumerImpl(subscriber))
