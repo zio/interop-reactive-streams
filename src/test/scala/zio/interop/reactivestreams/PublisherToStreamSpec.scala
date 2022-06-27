@@ -101,13 +101,13 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
             cancelledLatch <- Promise.make[Nothing, Unit]
             subscription = new Subscription {
                              override def request(n: Long): Unit = ()
-                             override def cancel(): Unit = Unsafe.unsafe { implicit u =>
+                             override def cancel(): Unit = Unsafe.unsafeCompat { implicit u =>
                                cancelledLatch.unsafe.done(ZIO.unit)
                              }
                            }
             probe = new Publisher[Int] {
                       override def subscribe(subscriber: Subscriber[_ >: Int]): Unit =
-                        Unsafe.unsafe { implicit u =>
+                        Unsafe.unsafeCompat { implicit u =>
                           subscriberP.unsafe.done(ZIO.succeedNow(subscriber))
                         }
                     }

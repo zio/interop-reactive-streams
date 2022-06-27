@@ -21,7 +21,7 @@ object Adapters {
         throw new NullPointerException("Subscriber must not be null.")
       } else {
         val subscription = new DemandTrackingSubscription(subscriber)
-        Unsafe.unsafe { implicit u =>
+        Unsafe.unsafeCompat { implicit u =>
           runtime.unsafe.fork(
             for {
               _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
@@ -150,7 +150,7 @@ object Adapters {
             done match {
               case Some(value) => ZIO.fail(value)
               case None =>
-                val p = Unsafe.unsafe { implicit u =>
+                val p = Unsafe.unsafeCompat { implicit u =>
                   Promise.unsafe.make[Option[Throwable], Unit](FiberId.None)
                 }
                 toNotify = Some(p)
@@ -171,7 +171,7 @@ object Adapters {
           override def onSubscribe(s: Subscription): Unit =
             if (s == null) {
               val e = new NullPointerException("s was null in onSubscribe")
-              Unsafe.unsafe { implicit u =>
+              Unsafe.unsafeCompat { implicit u =>
                 p.unsafe.done(ZIO.fail(e))
               }
               throw e
@@ -180,7 +180,7 @@ object Adapters {
               if (shouldCancel)
                 s.cancel()
               else
-                Unsafe.unsafe { implicit u =>
+                Unsafe.unsafeCompat { implicit u =>
                   p.unsafe.done(ZIO.succeedNow((s, q)))
                 }
             }
@@ -190,7 +190,7 @@ object Adapters {
               failNPE("t was null in onNext")
             } else {
               q.offer(t)
-              Unsafe.unsafe { implicit u =>
+              Unsafe.unsafeCompat { implicit u =>
                 toNotify.foreach(_.unsafe.done(ZIO.unit))
               }
             }
@@ -203,7 +203,7 @@ object Adapters {
 
           override def onComplete(): Unit = {
             done = Some(None)
-            Unsafe.unsafe { implicit u =>
+            Unsafe.unsafeCompat { implicit u =>
               toNotify.foreach(_.unsafe.done(ZIO.fail(None)))
             }
           }
@@ -216,7 +216,7 @@ object Adapters {
 
           private def fail(e: Throwable) = {
             done = Some(Some(e))
-            Unsafe.unsafe { implicit u =>
+            Unsafe.unsafeCompat { implicit u =>
               toNotify.foreach(_.unsafe.done(ZIO.fail(Some(e))))
             }
           }
@@ -270,7 +270,7 @@ object Adapters {
           result = ZIO.fail(())
           canceled
         case State(0L, _) =>
-          val p = Unsafe.unsafe(implicit u => Promise.unsafe.make[Unit, Int](FiberId.None))
+          val p = Unsafe.unsafeCompat(implicit u => Promise.unsafe.make[Unit, Int](FiberId.None))
           result = p.await
           awaiting(n, p)
         case State(requestedCount, _) =>
@@ -295,7 +295,7 @@ object Adapters {
           val accepted          = Math.min(offered.toLong, newRequestedCount)
           val remaining         = newRequestedCount - accepted
           notification = () =>
-            Unsafe.unsafe { implicit u =>
+            Unsafe.unsafeCompat { implicit u =>
               toNotify.unsafe.done(ZIO.succeedNow(accepted.toInt))
             }
           requested(remaining)
@@ -309,7 +309,7 @@ object Adapters {
 
     override def cancel(): Unit =
       state.getAndSet(canceled).toNotify.foreach { case (_, p) =>
-        Unsafe.unsafe { implicit u =>
+        Unsafe.unsafeCompat { implicit u =>
           p.unsafe.done(ZIO.fail(()))
         }
       }

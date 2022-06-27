@@ -93,19 +93,19 @@ object SinkToSubscriberSpec extends ZIOSpecDefault {
                       s.onSubscribe(
                         new Subscription {
                           override def request(n: Long): Unit = {
-                            Unsafe.unsafe { implicit u =>
+                            Unsafe.unsafeCompat { implicit u =>
                               requested.unsafe.done(ZIO.unit)
                             }
                             (1 to n.toInt).foreach(s.onNext(_))
                           }
                           override def cancel(): Unit =
-                            Unsafe.unsafe { implicit u =>
+                            Unsafe.unsafeCompat { implicit u =>
                               canceled.unsafe.done(ZIO.unit)
                             }
                         }
                       )
 
-                      Unsafe.unsafe { implicit u =>
+                      Unsafe.unsafeCompat { implicit u =>
                         subscribed.unsafe.done(ZIO.unit)
                       }
                     }
