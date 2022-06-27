@@ -191,7 +191,7 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
   val bufferSize: Int = 10
 
   def withProbe[R, E0, E >: Throwable, A](f: ManualPublisher[Int] => ZIO[R, E, A]): ZIO[R, E, A] = {
-    val testEnv = new TestEnvironment(3000, 500)
+    val testEnv = new TestEnvironment(5000, 500)
     val probe   = new ManualPublisher[Int](testEnv)
     f(probe) <* ZIO.attempt(testEnv.verifyNoAsyncErrorsNoDelay())
   }
