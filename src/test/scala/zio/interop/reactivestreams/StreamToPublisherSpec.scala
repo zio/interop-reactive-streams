@@ -3,7 +3,7 @@ package zio.interop.reactivestreams
 import org.reactivestreams.Publisher
 import org.reactivestreams.tck.{ PublisherVerification, TestEnvironment }
 import org.testng.annotations.Test
-import zio.ZIO
+import zio.{ Unsafe, ZIO }
 import zio.stream.ZStream
 import zio.test.Assertion._
 import zio.test._
@@ -20,19 +20,27 @@ object StreamToPublisherSpec extends ZIOSpecDefault {
     new PublisherVerification[Int](new TestEnvironment(2000, 500), 2000L) {
 
       def createPublisher(elements: Long): Publisher[Int] =
-        runtime.unsafeRun(
-          ZStream
-            .unfold(elements)(n => if (n > 0) Some((1, n - 1)) else None)
-            .toPublisher
-        )
+        Unsafe.unsafe { implicit u =>
+          runtime.unsafe
+            .run(
+              ZStream
+                .unfold(elements)(n => if (n > 0) Some((1, n - 1)) else None)
+                .toPublisher
+            )
+            .getOrThrowFiberFailure()
+        }
 
       override def createFailedPublisher(): Publisher[Int] =
-        runtime.unsafeRun(
-          ZStream
-            .fail(new RuntimeException("boom!"))
-            .map(_.asInstanceOf[Int])
-            .toPublisher
-        )
+        Unsafe.unsafe { implicit u =>
+          runtime.unsafe
+            .run(
+              ZStream
+                .fail(new RuntimeException("boom!"))
+                .map(_.asInstanceOf[Int])
+                .toPublisher
+            )
+            .getOrThrowFiberFailure()
+        }
     }
 
   val tests =

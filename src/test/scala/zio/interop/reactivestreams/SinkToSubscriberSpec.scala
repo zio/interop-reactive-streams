@@ -4,7 +4,7 @@ import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import org.reactivestreams.tck.SubscriberWhiteboxVerification.{ SubscriberPuppet, WhiteboxSubscriberProbe }
 import org.reactivestreams.tck.{ SubscriberWhiteboxVerification, TestEnvironment }
 import org.testng.annotations.Test
-import zio.{ Chunk, Promise, ZIO, durationInt, durationLong }
+import zio.{ Chunk, Promise, Unsafe, ZIO, durationInt, durationLong }
 import zio.stream.ZSink
 import zio.test.Assertion._
 import zio.test._
@@ -93,14 +93,21 @@ object SinkToSubscriberSpec extends ZIOSpecDefault {
                       s.onSubscribe(
                         new Subscription {
                           override def request(n: Long): Unit = {
-                            requested.unsafeDone(ZIO.unit)
+                            Unsafe.unsafe { implicit u =>
+                              requested.unsafe.done(ZIO.unit)
+                            }
                             (1 to n.toInt).foreach(s.onNext(_))
                           }
                           override def cancel(): Unit =
-                            canceled.unsafeDone(ZIO.unit)
+                            Unsafe.unsafe { implicit u =>
+                              canceled.unsafe.done(ZIO.unit)
+                            }
                         }
                       )
-                      subscribed.unsafeDone(ZIO.unit)
+
+                      Unsafe.unsafe { implicit u =>
+                        subscribed.unsafe.done(ZIO.unit)
+                      }
                     }
                   }
     } yield (publisher, subscribed, requested, canceled)

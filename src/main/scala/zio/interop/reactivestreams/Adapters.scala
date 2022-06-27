@@ -21,15 +21,18 @@ object Adapters {
         throw new NullPointerException("Subscriber must not be null.")
       } else {
         val subscription = new DemandTrackingSubscription(subscriber)
-        runtime.unsafeRunAsync(
-          for {
-            _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
-            _ <- stream
-                   .run(demandUnfoldSink(subscriber, subscription))
-                   .catchAll(e => ZIO.succeed(subscriber.onError(e)))
-                   .forkDaemon
-          } yield ()
-        )
+        Unsafe.unsafe { implicit u =>
+          runtime.unsafe.fork(
+            for {
+              _ <- ZIO.succeed(subscriber.onSubscribe(subscription))
+              _ <- stream
+                     .run(demandUnfoldSink(subscriber, subscription))
+                     .catchAll(e => ZIO.succeed(subscriber.onError(e)))
+                     .forkDaemon
+            } yield ()
+          )
+        }
+        ()
       }
     }
 
@@ -147,7 +150,9 @@ object Adapters {
             done match {
               case Some(value) => ZIO.fail(value)
               case None =>
-                val p = Promise.unsafeMake[Option[Throwable], Unit](FiberId.None)
+                val p = Unsafe.unsafe { implicit u =>
+                  Promise.unsafe.make[Option[Throwable], Unit](FiberId.None)
+                }
                 toNotify = Some(p)
                 // An element has arrived in the meantime, we do not need to start waiting.
                 if (!q.isEmpty()) {
@@ -166,14 +171,18 @@ object Adapters {
           override def onSubscribe(s: Subscription): Unit =
             if (s == null) {
               val e = new NullPointerException("s was null in onSubscribe")
-              p.unsafeDone(ZIO.fail(e))
+              Unsafe.unsafe { implicit u =>
+                p.unsafe.done(ZIO.fail(e))
+              }
               throw e
             } else {
               val shouldCancel = isSubscribedOrInterrupted.getAndSet(true)
               if (shouldCancel)
                 s.cancel()
               else
-                p.unsafeDone(ZIO.succeedNow((s, q)))
+                Unsafe.unsafe { implicit u =>
+                  p.unsafe.done(ZIO.succeedNow((s, q)))
+                }
             }
 
           override def onNext(t: A): Unit =
@@ -181,7 +190,9 @@ object Adapters {
               failNPE("t was null in onNext")
             } else {
               q.offer(t)
-              toNotify.foreach(_.unsafeDone(ZIO.unit))
+              Unsafe.unsafe { implicit u =>
+                toNotify.foreach(_.unsafe.done(ZIO.unit))
+              }
             }
 
           override def onError(e: Throwable): Unit =
@@ -192,7 +203,9 @@ object Adapters {
 
           override def onComplete(): Unit = {
             done = Some(None)
-            toNotify.foreach(_.unsafeDone(ZIO.fail(None)))
+            Unsafe.unsafe { implicit u =>
+              toNotify.foreach(_.unsafe.done(ZIO.fail(None)))
+            }
           }
 
           private def failNPE(msg: String) = {
@@ -203,7 +216,9 @@ object Adapters {
 
           private def fail(e: Throwable) = {
             done = Some(Some(e))
-            toNotify.foreach(_.unsafeDone(ZIO.fail(Some(e))))
+            Unsafe.unsafe { implicit u =>
+              toNotify.foreach(_.unsafe.done(ZIO.fail(Some(e))))
+            }
           }
 
         }
@@ -255,7 +270,7 @@ object Adapters {
           result = ZIO.fail(())
           canceled
         case State(0L, _) =>
-          val p = Promise.unsafeMake[Unit, Int](FiberId.None)
+          val p = Unsafe.unsafe(implicit u => Promise.unsafe.make[Unit, Int](FiberId.None))
           result = p.await
           awaiting(n, p)
         case State(requestedCount, _) =>
@@ -279,7 +294,10 @@ object Adapters {
           val newRequestedCount = requestedCount + n
           val accepted          = Math.min(offered.toLong, newRequestedCount)
           val remaining         = newRequestedCount - accepted
-          notification = () => toNotify.unsafeDone(ZIO.succeedNow(accepted.toInt))
+          notification = () =>
+            Unsafe.unsafe { implicit u =>
+              toNotify.unsafe.done(ZIO.succeedNow(accepted.toInt))
+            }
           requested(remaining)
         case State(requestedCount, _) if ((Long.MaxValue - n) > requestedCount) =>
           requested(requestedCount + n)
@@ -290,7 +308,11 @@ object Adapters {
     }
 
     override def cancel(): Unit =
-      state.getAndSet(canceled).toNotify.foreach { case (_, p) => p.unsafeDone(ZIO.fail(())) }
+      state.getAndSet(canceled).toNotify.foreach { case (_, p) =>
+        Unsafe.unsafe { implicit u =>
+          p.unsafe.done(ZIO.fail(()))
+        }
+      }
   }
 
   private def fromPull[R, E, A](zio: ZIO[R with Scope, Nothing, ZIO[R, Option[E], Chunk[A]]])(implicit

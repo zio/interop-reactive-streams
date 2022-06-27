@@ -5,18 +5,21 @@ import org.reactivestreams.Subscriber
 import org.reactivestreams.Subscription
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualPublisher
-import zio.Chunk
-import zio.Exit
-import zio.Fiber
-import zio.Promise
-import zio.Runtime
-import zio.Supervisor
-import zio.Task
-import zio.UIO
-import zio.ZEnvironment
-import zio.ZIO
-import zio.Trace
-import zio.durationInt
+import zio.{
+  Chunk,
+  Exit,
+  Fiber,
+  Promise,
+  Runtime,
+  Supervisor,
+  Task,
+  Trace,
+  UIO,
+  Unsafe,
+  ZEnvironment,
+  ZIO,
+  durationInt
+}
 import zio.stream.ZSink
 import zio.stream.ZStream
 import zio.test.Assertion._
@@ -55,14 +58,14 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
             def value(implicit trace: Trace): UIO[Boolean] =
               ZIO.succeed(failedAFiber)
 
-            def unsafeOnStart[R, E, A](
+            def onStart[R, E, A](
               environment: ZEnvironment[R],
               effect: ZIO[R, E, A],
               parent: Option[Fiber.Runtime[Any, Any]],
               fiber: Fiber.Runtime[E, A]
-            ): Unit = ()
+            )(implicit unsafe: Unsafe): Unit = ()
 
-            def unsafeOnEnd[R, E, A](value: Exit[E, A], fiber: Fiber.Runtime[E, A]): Unit =
+            def onEnd[R, E, A](value: Exit[E, A], fiber: Fiber.Runtime[E, A])(implicit unsafe: Unsafe): Unit =
               if (value.isFailure) failedAFiber = true
 
           }
@@ -100,11 +103,15 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
             cancelledLatch <- Promise.make[Nothing, Unit]
             subscription = new Subscription {
                              override def request(n: Long): Unit = ()
-                             override def cancel(): Unit         = cancelledLatch.unsafeDone(ZIO.unit)
+                             override def cancel(): Unit = Unsafe.unsafe { implicit u =>
+                               cancelledLatch.unsafe.done(ZIO.unit)
+                             }
                            }
             probe = new Publisher[Int] {
                       override def subscribe(subscriber: Subscriber[_ >: Int]): Unit =
-                        subscriberP.unsafeDone(ZIO.succeedNow(subscriber))
+                        Unsafe.unsafe { implicit u =>
+                          subscriberP.unsafe.done(ZIO.succeedNow(subscriber))
+                        }
                     }
             fiber      <- probe.toZIOStream(bufferSize).runDrain.fork
             subscriber <- subscriberP.await
