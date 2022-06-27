@@ -10,7 +10,7 @@ import scalafix.sbt.ScalafixPlugin.autoImport._
 object BuildHelper {
   val Scala211   = "2.11.12"
   val Scala212   = "2.12.15"
-  val Scala213   = "2.13.7"
+  val Scala213   = "2.13.8"
   val ScalaDotty = "3.1.0"
 
   private val stdOptions = Seq(
@@ -189,30 +189,6 @@ object BuildHelper {
         case _ =>
           Nil
       }
-    },
-    Test / unmanagedSourceDirectories ++= {
-      CrossVersion.partialVersion(scalaVersion.value) match {
-        case Some((2, x)) if x <= 11 =>
-          Seq(
-            Seq(file(sourceDirectory.value.getPath + "/test/scala-2.11")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.x"))
-          ).flatten
-        case Some((2, x)) if x >= 12 =>
-          Seq(
-            Seq(file(sourceDirectory.value.getPath + "/test/scala-2.12")),
-            Seq(file(sourceDirectory.value.getPath + "/test/scala-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-2.x"))
-          ).flatten
-        case Some((3, _)) =>
-          Seq(
-            Seq(file(sourceDirectory.value.getPath + "/test/scala-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "main").toList.map(f => file(f.getPath + "-2.12+")),
-            CrossType.Full.sharedSrcDir(baseDirectory.value, "test").toList.map(f => file(f.getPath + "-dotty"))
-          ).flatten
-        case _ =>
-          Nil
-      }
-
     }
   )
 

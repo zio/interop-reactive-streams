@@ -11,4 +11,5 @@ project/secrets.tar.xz
 project/travis-deploy-key
 project/zecret
 target
-test-output
+test-output/
+metals.sbt

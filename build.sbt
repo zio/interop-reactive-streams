@@ -36,9 +36,9 @@ Global / onChangedBuildSource := ReloadOnSourceChanges
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
 
-val zioVersion        = "1.0.15"
-val rsVersion         = "1.0.3"
-val collCompatVersion = "2.5.0"
+val zioVersion        = "2.0.0"
+val rsVersion         = "1.0.4"
+val collCompatVersion = "2.7.0"
 
 lazy val interopReactiveStreams = project
   .in(file("."))
@@ -63,3 +63,5 @@ lazy val interopReactiveStreams = project
         Seq("org.scala-lang.modules" %% "scala-collection-compat" % collCompatVersion % Test)
     }
   )
+  // .settings(Test / javaOptions += "-XX:ActiveProcessorCount=1") // uncomment to test for deadlocks
+  .settings(Test / fork := true)
