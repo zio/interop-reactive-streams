@@ -130,7 +130,7 @@ object Adapters {
       q <- ZIO.succeed(RingBuffer[A](capacity))
       p <- ZIO.acquireRelease(
              Promise
-               .make[Throwable, (Subscription, RingBuffer[A])].interruptible
+               .make[Throwable, (Subscription, RingBuffer[A])]
            )(
              _.poll.flatMap(_.fold(ZIO.unit)(_.foldZIO(_ => ZIO.unit, { case (sub, _) => ZIO.succeed(sub.cancel()) })))
            )
