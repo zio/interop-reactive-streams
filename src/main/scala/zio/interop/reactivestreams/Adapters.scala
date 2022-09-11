@@ -149,7 +149,8 @@ object Adapters {
 
           override def await(): IO[Option[Throwable], Unit] =
             done match {
-              case Some(value) => ZIO.fail(value)
+              case Some(value) =>
+                if (q.isEmpty()) ZIO.fail(value) else ZIO.unit
               case None =>
                 val p = Promise.unsafe.make[Option[Throwable], Unit](FiberId.None)
                 toNotify = Some(p)

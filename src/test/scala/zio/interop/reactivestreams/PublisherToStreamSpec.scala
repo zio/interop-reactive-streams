@@ -3,6 +3,7 @@ package zio.interop.reactivestreams
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
 import org.reactivestreams.Subscription
+import org.reactivestreams.example.unicast.NumberIterablePublisher
 import org.reactivestreams.tck.TestEnvironment
 import org.reactivestreams.tck.TestEnvironment.ManualPublisher
 import zio.Chunk
@@ -183,6 +184,16 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
             succeeds(isUnit)
           )
         )
+      },
+      test("collect all messages") {
+        for {
+          executor <- ZIO.executor
+          sum <- ZIO
+                   .foreach((1 to 10000).toVector) { _ =>
+                     Adapters.publisherToStream(new NumberIterablePublisher(0, 1, executor.asJava), 16).runCount
+                   }
+                   .map(_.sum)
+        } yield assert(sum)(equalTo(10000L))
       }
     )
 
