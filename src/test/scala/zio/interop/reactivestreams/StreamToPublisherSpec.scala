@@ -21,7 +21,7 @@ object StreamToPublisherSpec extends ZIOSpecDefault {
     new PublisherVerification[Int](new TestEnvironment(2000, 500), 2000L) {
 
       def createPublisher(elements: Long): Publisher[Int] =
-        Unsafe.unsafeCompat { implicit unsafe =>
+        Unsafe.unsafe { implicit unsafe =>
           runtime.unsafe
             .run(
               ZStream
@@ -32,7 +32,7 @@ object StreamToPublisherSpec extends ZIOSpecDefault {
         }
 
       override def createFailedPublisher(): Publisher[Int] =
-        Unsafe.unsafeCompat { implicit unsafe =>
+        Unsafe.unsafe { implicit unsafe =>
           runtime.unsafe
             .run(
               ZStream
