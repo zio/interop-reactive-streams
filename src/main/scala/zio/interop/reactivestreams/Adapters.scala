@@ -162,7 +162,7 @@ object Adapters {
                   done.fold(p.await) { e =>
                     // The producer has canceled or errored in the meantime.
                     toNotify = None
-                    ZIO.fail(e)
+                    if (q.isEmpty()) ZIO.fail(e) else ZIO.unit
                   }
             }
 
