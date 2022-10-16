@@ -97,7 +97,7 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
       } @@ TestAspect.timeout(3.seconds),
       test("cancels subscription when interrupted before subscription") {
         val tst =
-          Unsafe.unsafeCompat { implicit unsafe =>
+          Unsafe.unsafe { implicit unsafe =>
             for {
               subscriberP    <- Promise.make[Nothing, Subscriber[_]]
               cancelledLatch <- Promise.make[Nothing, Unit]

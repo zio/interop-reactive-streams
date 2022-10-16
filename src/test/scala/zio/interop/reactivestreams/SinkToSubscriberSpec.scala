@@ -85,7 +85,7 @@ object SinkToSubscriberSpec extends ZIOSpecDefault {
     )
 
   val makePublisherProbe =
-    Unsafe.unsafeCompat { implicit unsafe =>
+    Unsafe.unsafe { implicit unsafe =>
       for {
         subscribed <- Promise.make[Nothing, Unit]
         requested  <- Promise.make[Nothing, Unit]

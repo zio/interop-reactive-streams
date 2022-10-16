@@ -21,7 +21,7 @@ object Adapters {
       if (subscriber == null) {
         throw new NullPointerException("Subscriber must not be null.")
       } else
-        unsafeCompat { implicit unsafe =>
+        unsafe { implicit unsafe =>
           val subscription = new DemandTrackingSubscription(subscriber)
           runtime.unsafe.fork(
             for {
@@ -39,7 +39,7 @@ object Adapters {
   def subscriberToSink[E <: Throwable, I](
     subscriber: => Subscriber[I]
   )(implicit trace: Trace): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] =
-    unsafeCompat { implicit unsafe =>
+    unsafe { implicit unsafe =>
       val sub = subscriber
       for {
         error       <- Promise.make[E, Nothing]
@@ -59,7 +59,7 @@ object Adapters {
         subscriberP    <- makeSubscriber[O](bufferSize)
         (subscriber, p) = subscriberP
         _              <- ZIO.acquireRelease(ZIO.succeed(publisher.subscribe(subscriber)))(_ => ZIO.succeed(subscriber.interrupt()))
-        subQ           <- p.await.interruptible
+        subQ           <- p.await
         (sub, q)        = subQ
         process        <- process(sub, q, () => subscriber.await(), () => subscriber.isDone)
       } yield process
@@ -134,7 +134,7 @@ object Adapters {
            )(
              _.poll.flatMap(_.fold(ZIO.unit)(_.foldZIO(_ => ZIO.unit, { case (sub, _) => ZIO.succeed(sub.cancel()) })))
            )
-    } yield unsafeCompat { implicit unsafe =>
+    } yield unsafe { implicit unsafe =>
       val subscriber =
         new InterruptibleSubscriber[A] {
 
