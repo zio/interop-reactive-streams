@@ -3,6 +3,7 @@
 .metals
 .sbtopts
 .vscode
+.lh
 .idea
 metals.sbt
 project/.sbt
@@ -11,4 +12,5 @@ project/secrets.tar.xz
 project/travis-deploy-key
 project/zecret
 target
-test-output
+test-output/
+metals.sbt

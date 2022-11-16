@@ -5,7 +5,7 @@
 [![Releases][Badge-SonatypeReleases]][Link-SonatypeReleases]
 [![Snapshots][Badge-SonatypeSnapshots]][Link-SonatypeSnapshots]
 
-This library provides an interoperability layer for reactive streams.
+This library provides an interoperability layer between ZIO and reactive streams.
 
 ## Documentation
 

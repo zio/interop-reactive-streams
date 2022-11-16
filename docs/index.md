@@ -4,11 +4,11 @@ title: "Introduction to ZIO Interop Reactive Streams"
 sidebar_label: "ZIO Interop Reactive Streams"
 ---
 
-This library provides an interoperability layer for reactive streams.
+This library provides an interoperability layer between ZIO and reactive streams.
 
 ## Reactive Streams `Producer` and `Subscriber`
 
-**ZIO** integrates with [Reactive Streams](http://reactivestreams.org) by providing conversions from `zio.stream.Stream` to `org.reactivestreams.Publisher`
+**ZIO** integrates with [Reactive Streams](http://reactive-streams.org) by providing conversions from `zio.stream.Stream` to `org.reactivestreams.Publisher`
 and from `zio.stream.Sink` to `org.reactivestreams.Subscriber` and vice versa. Simply import `import zio.interop.reactivestreams._` to make the
 conversions available.
 
@@ -21,8 +21,6 @@ import org.reactivestreams.example.unicast._
 import zio._
 import zio.interop.reactivestreams._
 import zio.stream._
-
-val runtime = new DefaultRuntime {}
 ```
 
 We use the following `Publisher` and `Subscriber` for the examples:
@@ -43,37 +41,32 @@ A `Publisher` used as a `Stream` buffers up to `qSize` elements. If possible, `q
 a power of two for best performance. The default is 16.
 
 ```scala
-val streamFromPublisher = publisher.toStream(qSize = 16)
-runtime.unsafeRun(
-  streamFromPublisher.run(Sink.collectAll[Integer])
-)
+val streamFromPublisher = publisher.toZIOStream(qSize = 16)
+streamFromPublisher.run(Sink.collectAll[Integer])
 ```
 
 ### Subscriber to Sink
 
 When running a `Stream` to a `Subscriber`, a side channel is needed for signalling failures.
-For this reason `toSink` returns a tuple of `Promise` and `Sink`. The `Promise` must be failed
-on `Stream` failure. The type parameter on `toSink` is the error type of *the Stream*.
+For this reason `toZIOSink` returns a tuple of a callback and a `Sink`. The callback must be used to signal `Stream` failure. The type parameter on `toZIOSink` is the error type of *the Stream*.
 
 ```scala
-val asSink = subscriber.toSink[Throwable]
-val failingStream = Stream.range(3, 13) ++ Stream.fail(new RuntimeException("boom!"))
-runtime.unsafeRun(
-  asSink.flatMap { case (errorP, sink) =>
-    failingStream.run(sink).catchAll(errorP.fail)
+val asSink = subscriber.toZIOSink[Throwable]
+val failingStream = ZStream.range(3, 13) ++ ZStream.fail(new RuntimeException("boom!"))
+ZIO.scoped {
+  asSink.flatMap { case (signalError, sink) => // FIXME
+    failingStream.run(sink).catchAll(signalError)
   }
-)
+}
 ```
 
 ### Stream to Publisher
 
 ```scala
 val stream = Stream.range(3, 13)
-runtime.unsafeRun(
-  stream.toPublisher.flatMap { publisher =>
-    UIO(publisher.subscribe(subscriber))
-  }
-)
+stream.toPublisher.flatMap { publisher =>
+  UIO(publisher.subscribe(subscriber))
+}
 ```
 
 ### Sink to Subscriber
@@ -85,9 +78,9 @@ a power of two for best performance. The default is 16.
 
 ```scala
 val sink = Sink.collectAll[Integer]
-runtime.unsafeRun(
+ZIO.scoped {
   sink.toSubscriber(qSize = 16).flatMap { case (subscriber, result) => 
     UIO(publisher.subscribe(subscriber)) *> result
   }
-)
+}
 ```

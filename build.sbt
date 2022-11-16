@@ -3,8 +3,8 @@ import BuildHelper._
 inThisBuild(
   List(
     organization := "dev.zio",
-    homepage := Some(url("https://zio.dev/zio-interop-reactivestreams")),
-    licenses := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
+    homepage     := Some(url("https://zio.dev/zio-interop-reactivestreams")),
+    licenses     := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
     developers := List(
       Developer(
         "runtologist",
@@ -36,9 +36,9 @@ Global / onChangedBuildSource := ReloadOnSourceChanges
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
 
-val zioVersion        = "1.0.9"
-val rsVersion         = "1.0.3"
-val collCompatVersion = "2.4.4"
+val zioVersion        = "2.0.2"
+val rsVersion         = "1.0.4"
+val collCompatVersion = "2.7.0"
 
 lazy val interopReactiveStreams = project
   .in(file("."))
@@ -63,7 +63,9 @@ lazy val interopReactiveStreams = project
         Seq("org.scala-lang.modules" %% "scala-collection-compat" % collCompatVersion % Test)
     }
   )
-  
+  // .settings(Test / javaOptions += "-XX:ActiveProcessorCount=1") // uncomment to test for deadlocks
+  .settings(Test / fork := true)
+
 lazy val docs = project
   .in(file("zio-interop-reactivestreams-docs"))
   .settings(
