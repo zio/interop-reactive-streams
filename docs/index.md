@@ -4,6 +4,8 @@ title: "Introduction to ZIO Interop Reactive Streams"
 sidebar_label: "ZIO Interop Reactive Streams"
 ---
 
+This library provides an interoperability layer for reactive streams.
+
 ## Reactive Streams `Producer` and `Subscriber`
 
 **ZIO** integrates with [Reactive Streams](http://reactivestreams.org) by providing conversions from `zio.stream.Stream` to `org.reactivestreams.Publisher`
