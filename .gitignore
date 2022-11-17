@@ -4,6 +4,7 @@
 .sbtopts
 .vscode
 .lh
+.idea
 metals.sbt
 project/.sbt
 project/metals.sbt

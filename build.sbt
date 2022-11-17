@@ -3,7 +3,7 @@ import BuildHelper._
 inThisBuild(
   List(
     organization := "dev.zio",
-    homepage     := Some(url("https://zio.dev")),
+    homepage     := Some(url("https://zio.dev/zio-interop-reactivestreams")),
     licenses     := List("Apache-2.0" -> url("http://www.apache.org/licenses/LICENSE-2.0")),
     developers := List(
       Developer(
@@ -65,3 +65,17 @@ lazy val interopReactiveStreams = project
   )
   // .settings(Test / javaOptions += "-XX:ActiveProcessorCount=1") // uncomment to test for deadlocks
   .settings(Test / fork := true)
+
+lazy val docs = project
+  .in(file("zio-interop-reactivestreams-docs"))
+  .settings(
+    publish / skip := true,
+    moduleName     := "zio-interop-reactivestreams-docs",
+    scalacOptions -= "-Yno-imports",
+    scalacOptions -= "-Xfatal-warnings",
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zioVersion
+    )
+  )
+  .dependsOn(interopReactiveStreams)
+  .enablePlugins(WebsitePlugin)
