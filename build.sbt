@@ -75,6 +75,13 @@ lazy val docs = project
     scalacOptions -= "-Xfatal-warnings",
     libraryDependencies ++= Seq(
       "dev.zio" %% "zio" % zioVersion
+    ),
+    projectName := "ZIO Interop Reactive Streams",
+    badgeInfo := Some(
+      BadgeInfo(
+        artifact = "zio-interop-reactive-streams_2.12",
+        projectStage = ProjectStage.ProductionReady
+      )
     )
   )
   .dependsOn(interopReactiveStreams)
