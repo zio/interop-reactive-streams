@@ -84,5 +84,4 @@ lazy val docs = project
       )
     )
   )
-  .dependsOn(interopReactiveStreams)
   .enablePlugins(WebsitePlugin)
