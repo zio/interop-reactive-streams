@@ -40,8 +40,14 @@ val zioVersion        = "2.0.5"
 val rsVersion         = "1.0.4"
 val collCompatVersion = "2.7.0"
 
+lazy val root =
+  project
+    .in(file("."))
+    .settings(publish / skip := true)
+    .aggregate(interopReactiveStreams, docs)
+
 lazy val interopReactiveStreams = project
-  .in(file("."))
+  .in(file("zio-interop-reactivestreams"))
   .enablePlugins(BuildInfoPlugin)
   .settings(buildInfoSettings("zio.interop.reactivestreams"))
   .settings(stdSettings("zio-interop-reactivestreams"))
@@ -84,4 +90,5 @@ lazy val docs = project
       )
     )
   )
+  .dependsOn(interopReactiveStreams)
   .enablePlugins(WebsitePlugin)
