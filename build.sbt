@@ -75,7 +75,8 @@ lazy val interopReactiveStreams = project
 lazy val docs = project
   .in(file("zio-interop-reactivestreams-docs"))
   .settings(
-    moduleName := "zio-interop-reactivestreams-docs",
+    publish / skip := true,
+    moduleName     := "zio-interop-reactivestreams-docs",
     scalacOptions -= "-Yno-imports",
     scalacOptions -= "-Xfatal-warnings",
     libraryDependencies ++= Seq(
