@@ -6,11 +6,19 @@ sidebar_label: "ZIO Interop Reactive Streams"
 
 This library provides an interoperability layer between ZIO and reactive streams.
 
-## Reactive Streams `Producer` and `Subscriber`
+@PROJECT_BADGES@
 
-**ZIO** integrates with [Reactive Streams](http://reactive-streams.org) by providing conversions from `zio.stream.Stream` to `org.reactivestreams.Publisher`
-and from `zio.stream.Sink` to `org.reactivestreams.Subscriber` and vice versa. Simply import `import zio.interop.reactivestreams._` to make the
-conversions available.
+## Introduction
+
+**ZIO** integrates with [Reactive Streams](http://reactive-streams.org) by providing conversions from `zio.stream.Stream` to `org.reactivestreams.Publisher` and from `zio.stream.Sink` to `org.reactivestreams.Subscriber` and vice versa. Simply import `import zio.interop.reactivestreams._` to make the conversions available.
+
+## Installation
+
+In order to use this library, we need to add the following line in our `build.sbt` file:
+
+```scala
+libraryDependencies += "dev.zio" %% "zio-interop-reactive-streams" % "@VERSION@"
+```
 
 ## Examples
 
