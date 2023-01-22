@@ -84,7 +84,7 @@ lazy val docs = project
     projectName                                := "ZIO Interop Reactive Streams",
     mainModuleName                             := (interopReactiveStreams / moduleName).value,
     projectStage                               := ProjectStage.ProductionReady,
-    ScalaUnidoc / unidoc / unidocProjectFilter := inProjects(interopReactiveStreams),
+    ScalaUnidoc / unidoc / unidocProjectFilter := inProjects(),
     docsPublishBranch                          := "master"
   )
   .dependsOn(interopReactiveStreams)
