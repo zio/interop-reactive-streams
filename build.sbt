@@ -87,5 +87,4 @@ lazy val docs = project
     ScalaUnidoc / unidoc / unidocProjectFilter := inProjects(),
     docsPublishBranch                          := "master"
   )
-  .dependsOn(interopReactiveStreams)
   .enablePlugins(WebsitePlugin)
