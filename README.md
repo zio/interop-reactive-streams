@@ -6,11 +6,19 @@
 
 This library provides an interoperability layer between ZIO and reactive streams.
 
-## Reactive Streams `Producer` and `Subscriber`
+[![Production Ready](https://img.shields.io/badge/Project%20Stage-Production%20Ready-brightgreen.svg)](https://github.com/zio/zio/wiki/Project-Stages) ![CI Badge](https://github.com/zio/interop-reactive-streams/workflows/CI/badge.svg) [![Sonatype Releases](https://img.shields.io/nexus/r/https/oss.sonatype.org/dev.zio/zio-interop-reactivestreams_2.13.svg?label=Sonatype%20Release)](https://oss.sonatype.org/content/repositories/releases/dev/zio/zio-interop-reactivestreams_2.13/) [![Sonatype Snapshots](https://img.shields.io/nexus/s/https/oss.sonatype.org/dev.zio/zio-interop-reactivestreams_2.13.svg?label=Sonatype%20Snapshot)](https://oss.sonatype.org/content/repositories/snapshots/dev/zio/zio-interop-reactivestreams_2.13/) [![javadoc](https://javadoc.io/badge2/dev.zio/zio-interop-reactivestreams-docs_2.13/javadoc.svg)](https://javadoc.io/doc/dev.zio/zio-interop-reactivestreams-docs_2.13) [![ZIO Interop Reactive Streams](https://img.shields.io/github/stars/zio/interop-reactive-streams?style=social)](https://github.com/zio/interop-reactive-streams)
 
-**ZIO** integrates with [Reactive Streams](http://reactive-streams.org) by providing conversions from `zio.stream.Stream` to `org.reactivestreams.Publisher`
-and from `zio.stream.Sink` to `org.reactivestreams.Subscriber` and vice versa. Simply import `import zio.interop.reactivestreams._` to make the
-conversions available.
+## Introduction
+
+**ZIO** integrates with [Reactive Streams](http://reactive-streams.org) by providing conversions from `zio.stream.Stream` to `org.reactivestreams.Publisher` and from `zio.stream.Sink` to `org.reactivestreams.Subscriber` and vice versa. Simply import `import zio.interop.reactivestreams._` to make the conversions available.
+
+## Installation
+
+In order to use this library, we need to add the following line in our `build.sbt` file:
+
+```scala
+libraryDependencies += "dev.zio" %% "zio-interop-reactive-streams" % "2.0.0"
+```
 
 ## Examples
 

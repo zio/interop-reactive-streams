@@ -42,14 +42,12 @@ val collCompatVersion = "2.7.0"
 
 lazy val root =
   project
-    .in(file("zio-interop-reactivestreams"))
-    .settings(
-      publish / skip := true
-    )
+    .in(file("."))
+    .settings(publish / skip := true)
     .aggregate(interopReactiveStreams, docs)
 
 lazy val interopReactiveStreams = project
-  .in(file("."))
+  .in(file("zio-interop-reactivestreams"))
   .enablePlugins(BuildInfoPlugin)
   .settings(buildInfoSettings("zio.interop.reactivestreams"))
   .settings(stdSettings("zio-interop-reactivestreams"))
@@ -80,7 +78,9 @@ lazy val docs = project
     moduleName := "zio-interop-reactivestreams-docs",
     scalacOptions -= "-Yno-imports",
     scalacOptions -= "-Xfatal-warnings",
-    libraryDependencies ++= Seq("dev.zio" %% "zio" % zioVersion),
+    libraryDependencies ++= Seq(
+      "dev.zio" %% "zio" % zioVersion
+    ),
     projectName                                := "ZIO Interop Reactive Streams",
     mainModuleName                             := (interopReactiveStreams / moduleName).value,
     projectStage                               := ProjectStage.ProductionReady,
