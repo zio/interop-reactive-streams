@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         java: ['adopt@1.8', 'adopt@1.11']
-        scala: ['2.11.12', '2.12.15', '2.13.8', '3.1.0']
+        scala: ['2.11.12', '2.12.15', '2.13.8', '3.2.1']
     steps:
       - name: Checkout current branch
         uses: actions/checkout@v3.0.1
@@ -46,7 +46,7 @@ jobs:
       - name: Cache scala dependencies
         uses: coursier/cache-action@v6
       - name: Run tests
-        run: sbt ++${{ matrix.scala }}! test
+        run: sbt ++${{ matrix.scala }} test
 
   website:
     runs-on: ubuntu-20.04

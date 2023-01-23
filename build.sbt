@@ -75,7 +75,8 @@ lazy val interopReactiveStreams = project
 lazy val docs = project
   .in(file("zio-interop-reactivestreams-docs"))
   .settings(
-    moduleName := "zio-interop-reactivestreams-docs",
+    moduleName         := "zio-interop-reactivestreams-docs",
+    crossScalaVersions := Seq(Scala212, Scala213),
     scalacOptions -= "-Yno-imports",
     scalacOptions -= "-Xfatal-warnings",
     libraryDependencies ++= Seq(
@@ -84,8 +85,7 @@ lazy val docs = project
     projectName                                := "ZIO Interop Reactive Streams",
     mainModuleName                             := (interopReactiveStreams / moduleName).value,
     projectStage                               := ProjectStage.ProductionReady,
-    ScalaUnidoc / unidoc / unidocProjectFilter := inProjects(interopReactiveStreams),
+    ScalaUnidoc / unidoc / unidocProjectFilter := inProjects(),
     docsPublishBranch                          := "master"
   )
-  .dependsOn(interopReactiveStreams)
   .enablePlugins(WebsitePlugin)
