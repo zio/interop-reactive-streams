@@ -77,7 +77,7 @@ object Adapters {
       pull = p.await.flatMap { case (subscription, q) =>
                process(subscription, q, () => subscriber.await(), () => subscriber.isDone, bufferSize)
              }
-               .catchAll(e => ZIO.succeedNow(Pull.fail(e)))
+               .catchAll(e => ZIO.succeed(Pull.fail(e)))
       fiber <- fromPull(pull).run(sink).forkScoped
     } yield (subscriber, fiber.join)
 
@@ -178,7 +178,7 @@ object Adapters {
               if (shouldCancel)
                 s.cancel()
               else
-                p.unsafe.done(ZIO.succeedNow((s, q)))
+                p.unsafe.done(ZIO.succeed((s, q)))
             }
 
           override def onNext(t: A): Unit =
@@ -267,7 +267,7 @@ object Adapters {
         case State(requestedCount, _) =>
           val newRequestedCount = Math.max(requestedCount - n, 0L)
           val accepted          = Math.min(requestedCount, n.toLong).toInt
-          result = ZIO.succeedNow(accepted)
+          result = ZIO.succeed(accepted)
           requested(newRequestedCount)
       }
       result
@@ -285,7 +285,7 @@ object Adapters {
           val newRequestedCount = requestedCount + n
           val accepted          = Math.min(offered.toLong, newRequestedCount)
           val remaining         = newRequestedCount - accepted
-          notification = () => toNotify.unsafe.done(ZIO.succeedNow(accepted.toInt))
+          notification = () => toNotify.unsafe.done(ZIO.succeed(accepted.toInt))
           requested(remaining)
         case State(requestedCount, _) if ((Long.MaxValue - n) > requestedCount) =>
           requested(requestedCount + n)
