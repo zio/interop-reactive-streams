@@ -58,7 +58,7 @@ object Adapters {
         val subscription = new DemandTrackingSubscription(sub)
         ZIO.succeed(sub.onSubscribe(subscription)).as {
           def handleInput(
-            keepReading: ZChannel[Any, Throwable, Chunk[I], Any, Unit, Nothing, Unit]
+            keepReading: => ZChannel[Any, Throwable, Chunk[I], Any, Unit, Nothing, Unit]
           )(chunk: Chunk[I]): ZChannel[Any, Throwable, Chunk[I], Any, Unit, Nothing, Unit] =
             ZChannel.unwrap {
               ZIO

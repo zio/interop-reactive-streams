@@ -106,7 +106,7 @@ object ChannelToSubscriberSpec extends ZIOSpecDefault {
         actual     <- subscriber.getState
       } yield {
         val (subscribe, values, error, complete) = actual
-        assertTrue(values == expected && subscribe && error.isEmpty && !complete && errorValue == ())
+        assertTrue(values == expected && subscribe && error.isEmpty && !complete && errorValue == (()))
       }
     }
   )
