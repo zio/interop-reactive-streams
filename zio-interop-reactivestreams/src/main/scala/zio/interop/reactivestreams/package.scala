@@ -65,15 +65,16 @@ package object reactivestreams {
 
     /** A channel that outputs to a reactive streams subscriber.
       *
-      * The upstream can fail with any `Throwable`, which will be propagated to the subscriber's `onError` method. If
-      * the subscriber cancels its subscription, the channel fails with unit.
+      * The upstream can fail with any `Throwable`, which will be signalled to the subscriber's `onError` method, and
+      * the channel fails with `Some(throwable)`. If the subscriber cancels its subscription, the channel fails with
+      * `None`.
       *
       * @param subscriber
       *   The reactive streams subscriber to output to.
       */
     def toSubscriber[I](subscriber: Subscriber[I])(implicit
       trace: Trace
-    ): ZChannel[Any, Throwable, Chunk[I], Any, Unit, Nothing, Unit] =
+    ): ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit] =
       Adapters.subscriberToChannel(subscriber)
 
   }

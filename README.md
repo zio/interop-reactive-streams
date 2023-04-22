@@ -55,7 +55,7 @@ streamFromPublisher.run(Sink.collectAll[Integer])
 
 ### Channel that outputs to a Subscriber
 
-`ZChannel.toSubscriber` creates a channel that outputs to a `Subscriber`. The upstream can fail with any `Throwable`, which will be signaled to the subscriber's `onError` method. If the subscriber cancels its subscription, the channel fails with unit.
+`ZChannel.toSubscriber` creates a channel that outputs to a `Subscriber`. The upstream can fail with any `Throwable`, which will be signaled to the subscriber's `onError` method and cause the channel to fail with `Some(throwable)`. If the subscriber cancels its subscription, the channel fails with `None`.
 
 To use the channel as the destination for a stream, one method is to use `pipeThroughChannel` to get the effect of signalling the subscriber, and `runDrain` to run the resulting stream.
 

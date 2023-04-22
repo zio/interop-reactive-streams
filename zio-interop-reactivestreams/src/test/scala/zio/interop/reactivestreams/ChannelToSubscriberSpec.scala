@@ -39,10 +39,10 @@ object ChannelToSubscriberSpec extends ZIOSpecDefault {
   override def spec = suite("Channel writing to a subscriber spec")(
     test("works with a basic subscriber") {
       val subscriber = new TestSubscriber(100, 1)
-      val channel: ZChannel[Any, Throwable, Chunk[Int], Any, Unit, Nothing, Unit] =
+      val channel: ZChannel[Any, Throwable, Chunk[Int], Any, Option[Throwable], Nothing, Unit] =
         ZChannel.toSubscriber(subscriber)
-      val input                               = ZStream(1, 2, 3).concat(ZStream(100, 200))
-      val stream: ZStream[Any, Unit, Nothing] = input.pipeThroughChannel(channel)
+      val input                                            = ZStream(1, 2, 3).concat(ZStream(100, 200))
+      val stream: ZStream[Any, Option[Throwable], Nothing] = input.pipeThroughChannel(channel)
       for {
         expected <- input.runCollect
         _        <- ZIO.succeed(println("start"))
@@ -55,10 +55,10 @@ object ChannelToSubscriberSpec extends ZIOSpecDefault {
     },
     test("works with limited subscriber demand") {
       val subscriber = new TestSubscriber(2, 1)
-      val channel: ZChannel[Any, Throwable, Chunk[Int], Any, Unit, Nothing, Unit] =
+      val channel: ZChannel[Any, Throwable, Chunk[Int], Any, Option[Throwable], Nothing, Unit] =
         ZChannel.toSubscriber(subscriber)
-      val input                               = ZStream(1, 2, 3, 4, 5, 6)
-      val stream: ZStream[Any, Unit, Nothing] = input.pipeThroughChannel(channel)
+      val input                                            = ZStream(1, 2, 3, 4, 5, 6)
+      val stream: ZStream[Any, Option[Throwable], Nothing] = input.pipeThroughChannel(channel)
       for {
         expected <- input.runCollect
         _        <- stream.runDrain
@@ -68,21 +68,25 @@ object ChannelToSubscriberSpec extends ZIOSpecDefault {
         assertTrue(values == expected && subscribe && error.isEmpty && complete)
       }
     },
-    test("signals upstream errors to the subscriber") {
+    test("signals upstream errors to the subscriber and the downstream") {
       val subscriber = new TestSubscriber(1, 1)
-      val channel: ZChannel[Any, Throwable, Chunk[Int], Any, Unit, Nothing, Unit] =
+      val channel: ZChannel[Any, Throwable, Chunk[Int], Any, Option[Throwable], Nothing, Unit] =
         ZChannel.toSubscriber(subscriber)
       val exception = new IllegalStateException("boom")
       val input     = ZStream(1, 2, 3)
-      val stream: ZStream[Any, Unit, Nothing] =
+      val stream: ZStream[Any, Option[Throwable], Nothing] =
         input.concat(ZStream.fail(exception)).concat(ZStream(100, 200)).pipeThroughChannel(channel)
       for {
-        expected <- input.runCollect
-        _        <- stream.runDrain
-        actual   <- subscriber.getState
+        expected    <- input.runCollect
+        resultError <- stream.runDrain.flip
+        actual      <- subscriber.getState
       } yield {
         val (subscribe, values, error, complete) = actual
-        assertTrue(values == expected && subscribe && error.contains(exception) && !complete)
+        assertTrue(
+          values == expected && subscribe && error.contains(exception) && !complete && resultError.is(
+            _.some
+          ) == exception
+        )
       }
     },
     test("reports cancellation by the subscriber") {
@@ -96,17 +100,17 @@ object ChannelToSubscriberSpec extends ZIOSpecDefault {
             super.onNext(t)
         }
       }
-      val channel: ZChannel[Any, Throwable, Chunk[Int], Any, Unit, Nothing, Unit] =
+      val channel: ZChannel[Any, Throwable, Chunk[Int], Any, Option[Throwable], Nothing, Unit] =
         ZChannel.toSubscriber(subscriber)
-      val input                               = ZStream(1, 2, 3, 4, 5)
-      val stream: ZStream[Any, Unit, Nothing] = input.pipeThroughChannel(channel)
+      val input                                            = ZStream(1, 2, 3, 4, 5)
+      val stream: ZStream[Any, Option[Throwable], Nothing] = input.pipeThroughChannel(channel)
       for {
         expected   <- input.take(2).runCollect
         errorValue <- stream.runDrain.flip
         actual     <- subscriber.getState
       } yield {
         val (subscribe, values, error, complete) = actual
-        assertTrue(values == expected && subscribe && error.isEmpty && !complete && errorValue == (()))
+        assertTrue(values == expected && subscribe && error.isEmpty && !complete && errorValue.isEmpty)
       }
     }
   )

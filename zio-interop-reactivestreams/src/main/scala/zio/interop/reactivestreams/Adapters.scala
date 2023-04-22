@@ -51,15 +51,15 @@ object Adapters {
 
   def subscriberToChannel[I](subscriber: => Subscriber[I])(implicit
     trace: Trace
-  ): ZChannel[Any, Throwable, Chunk[I], Any, Unit, Nothing, Unit] = unsafe { implicit unsafe =>
+  ): ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit] = unsafe { implicit unsafe =>
     ZChannel.unwrap {
       ZIO.suspendSucceed {
         val sub          = subscriber
         val subscription = new DemandTrackingSubscription(sub)
         ZIO.succeed(sub.onSubscribe(subscription)).as {
           def handleInput(
-            keepReading: => ZChannel[Any, Throwable, Chunk[I], Any, Unit, Nothing, Unit]
-          )(chunk: Chunk[I]): ZChannel[Any, Throwable, Chunk[I], Any, Unit, Nothing, Unit] =
+            keepReading: => ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit]
+          )(chunk: Chunk[I]): ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit] =
             ZChannel.unwrap {
               ZIO
                 .iterate(chunk)(!_.isEmpty) { chunk =>
@@ -69,21 +69,21 @@ object Adapters {
                   }
                 }
                 .fold(
-                  _ => ZChannel.fail(()), // canceled
+                  _ => ZChannel.fail(None), // canceled
                   _ => ZChannel.unit
                 )
             } *> keepReading
-          def handleError(t: Throwable): ZChannel[Any, Throwable, Chunk[I], Any, Nothing, Nothing, Unit] =
+          def handleError(t: Throwable): ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit] =
             ZChannel.succeed {
               if (!subscription.isCanceled)
                 sub.onError(t)
-            }
+            } *> ZChannel.fail(Some(t))
           val handleDone: Any => ZChannel[Any, Throwable, Chunk[I], Any, Nothing, Nothing, Unit] = _ =>
             ZChannel.succeed {
               if (!subscription.isCanceled)
                 sub.onComplete()
             }
-          lazy val chan: ZChannel[Any, Throwable, Chunk[I], Any, Unit, Nothing, Unit] = ZChannel
+          lazy val chan: ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit] = ZChannel
             .readWith(handleInput(chan), handleError, handleDone)
           chan
         }
