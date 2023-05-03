@@ -45,7 +45,7 @@ object Adapters {
         error       <- Promise.make[E, Nothing]
         subscription = new DemandTrackingSubscription(sub)
         _           <- ZIO.succeed(sub.onSubscribe(subscription))
-        fiber       <- error.await.catchAll(t => ZIO.succeed(sub.onError(t))).forkScoped
+        fiber       <- error.await.interruptible.catchAll(t => ZIO.succeed(sub.onError(t))).forkScoped
       } yield (error.fail(_) *> fiber.join, demandUnfoldSink(sub, subscription))
     }
 
