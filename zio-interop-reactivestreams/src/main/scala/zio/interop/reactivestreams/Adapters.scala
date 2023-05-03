@@ -49,6 +49,48 @@ object Adapters {
       } yield (error.fail(_) *> fiber.join, demandUnfoldSink(sub, subscription))
     }
 
+  def subscriberToChannel[I](subscriber: => Subscriber[I])(implicit
+    trace: Trace
+  ): ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit] = unsafe { implicit unsafe =>
+    ZChannel.unwrap {
+      ZIO.suspendSucceed {
+        val sub          = subscriber
+        val subscription = new DemandTrackingSubscription(sub)
+        ZIO.succeed(sub.onSubscribe(subscription)).as {
+          def handleInput(
+            keepReading: => ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit]
+          )(chunk: Chunk[I]): ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit] =
+            ZChannel.unwrap {
+              ZIO
+                .iterate(chunk)(!_.isEmpty) { chunk =>
+                  subscription.offer(chunk.size).flatMap { acceptedCount =>
+                    val (send, remain) = chunk.splitAt(acceptedCount)
+                    ZIO.foreachDiscard(send)(a => ZIO.succeed(sub.onNext(a))).as(remain)
+                  }
+                }
+                .fold(
+                  _ => ZChannel.fail(None), // canceled
+                  _ => ZChannel.unit
+                )
+            } *> keepReading
+          def handleError(t: Throwable): ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit] =
+            ZChannel.succeed {
+              if (!subscription.isCanceled)
+                sub.onError(t)
+            } *> ZChannel.fail(Some(t))
+          val handleDone: Any => ZChannel[Any, Throwable, Chunk[I], Any, Nothing, Nothing, Unit] = _ =>
+            ZChannel.succeed {
+              if (!subscription.isCanceled)
+                sub.onComplete()
+            }
+          lazy val chan: ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit] = ZChannel
+            .readWith(handleInput(chan), handleError, handleDone)
+          chan
+        }
+      }
+    }
+  }
+
   def publisherToStream[O](
     publisher: => Publisher[O],
     bufferSize: => Int
@@ -77,7 +119,7 @@ object Adapters {
       pull = p.await.flatMap { case (subscription, q) =>
                process(subscription, q, () => subscriber.await(), () => subscriber.isDone, bufferSize)
              }
-               .catchAll(e => ZIO.succeedNow(Pull.fail(e)))
+               .catchAll(e => ZIO.succeed(Pull.fail(e)))
       fiber <- fromPull(pull).run(sink).forkScoped
     } yield (subscriber, fiber.join)
 
@@ -178,7 +220,7 @@ object Adapters {
               if (shouldCancel)
                 s.cancel()
               else
-                p.unsafe.done(ZIO.succeedNow((s, q)))
+                p.unsafe.done(ZIO.succeed((s, q)))
             }
 
           override def onNext(t: A): Unit =
@@ -267,7 +309,7 @@ object Adapters {
         case State(requestedCount, _) =>
           val newRequestedCount = Math.max(requestedCount - n, 0L)
           val accepted          = Math.min(requestedCount, n.toLong).toInt
-          result = ZIO.succeedNow(accepted)
+          result = ZIO.succeed(accepted)
           requested(newRequestedCount)
       }
       result
@@ -285,7 +327,7 @@ object Adapters {
           val newRequestedCount = requestedCount + n
           val accepted          = Math.min(offered.toLong, newRequestedCount)
           val remaining         = newRequestedCount - accepted
-          notification = () => toNotify.unsafe.done(ZIO.succeedNow(accepted.toInt))
+          notification = () => toNotify.unsafe.done(ZIO.succeed(accepted.toInt))
           requested(remaining)
         case State(requestedCount, _) if ((Long.MaxValue - n) > requestedCount) =>
           requested(requestedCount + n)

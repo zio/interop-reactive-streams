@@ -5,6 +5,8 @@ import org.reactivestreams.Subscriber
 import zio.{ Scope, UIO, Task, ZIO, Trace }
 import zio.stream.ZSink
 import zio.stream.ZStream
+import zio.stream.ZChannel
+import zio.Chunk
 
 package object reactivestreams {
 
@@ -57,6 +59,24 @@ package object reactivestreams {
       trace: Trace
     ): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
+  }
+
+  final implicit class ZChannelInterop(private val zchannel: ZChannel.type) extends AnyVal {
+
+    /** A channel that outputs to a reactive streams subscriber.
+      *
+      * The upstream can fail with any `Throwable`, which will be signalled to the subscriber's `onError` method, and
+      * the channel fails with `Some(throwable)`. If the subscriber cancels its subscription, the channel fails with
+      * `None`.
+      *
+      * @param subscriber
+      *   The reactive streams subscriber to output to.
+      */
+    def toSubscriber[I](subscriber: Subscriber[I])(implicit
+      trace: Trace
+    ): ZChannel[Any, Throwable, Chunk[I], Any, Option[Throwable], Nothing, Unit] =
+      Adapters.subscriberToChannel(subscriber)
+
   }
 
 }

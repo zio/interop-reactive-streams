@@ -53,19 +53,16 @@ val streamFromPublisher = publisher.toZIOStream(qSize = 16)
 streamFromPublisher.run(Sink.collectAll[Integer])
 ```
 
-### Subscriber to Sink
+### Channel that outputs to a Subscriber
 
-When running a `Stream` to a `Subscriber`, a side channel is needed for signalling failures.
-For this reason `toZIOSink` returns a tuple of a callback and a `Sink`. The callback must be used to signal `Stream` failure. The type parameter on `toZIOSink` is the error type of *the Stream*.
+`ZChannel.toSubscriber` creates a channel that outputs to a `Subscriber`. The upstream can fail with any `Throwable`, which will be signaled to the subscriber's `onError` method and cause the channel to fail with `Some(throwable)`. If the subscriber cancels its subscription, the channel fails with `None`.
+
+To use the channel as the destination for a stream, one method is to use `pipeThroughChannel` to get the effect of signalling the subscriber, and `runDrain` to run the resulting stream.
 
 ```scala
-val asSink = subscriber.toZIOSink[Throwable]
+val subscriberChannel = ZChannel.toSubscriber(subscriber)
 val failingStream = ZStream.range(3, 13) ++ ZStream.fail(new RuntimeException("boom!"))
-ZIO.scoped {
-  asSink.flatMap { case (signalError, sink) => // FIXME
-    failingStream.run(sink).catchAll(signalError)
-  }
-}
+failingStream.pipeThroughChannel(subscriberChannel).runDrain
 ```
 
 ### Stream to Publisher
