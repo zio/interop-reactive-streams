@@ -17,7 +17,7 @@ This library provides an interoperability layer between ZIO and reactive streams
 In order to use this library, we need to add the following line in our `build.sbt` file:
 
 ```scala
-libraryDependencies += "dev.zio" %% "zio-interop-reactive-streams" % "@VERSION@"
+libraryDependencies += "dev.zio" %% "zio-interop-reactivestreams" % "@VERSION@"
 ```
 
 ## Examples
