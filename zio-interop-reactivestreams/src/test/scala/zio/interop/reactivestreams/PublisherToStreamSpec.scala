@@ -107,7 +107,7 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
                              }
               probe = new Publisher[Int] {
                         override def subscribe(subscriber: Subscriber[_ >: Int]): Unit =
-                          subscriberP.unsafe.done(ZIO.succeedNow(subscriber))
+                          subscriberP.unsafe.done(ZIO.succeed(subscriber))
                       }
               fiber      <- probe.toZIOStream(bufferSize).runDrain.fork
               subscriber <- subscriberP.await
