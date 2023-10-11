@@ -54,31 +54,30 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
     private val events                          = ListBuffer[ProcessorEvent[A]]()
 
     def onSubscribe(subscription: Flow.Subscription): Unit = {
-      this.events.addOne(ProcessorEvent.OnSubscribe)
+      this.events += ProcessorEvent.OnSubscribe
       this.subscription = subscription;
-      println(subscription)
       subscription.request(1);
     }
 
     def onNext(item: A): Unit = {
-      this.events.addOne(ProcessorEvent.OnNext(item))
+      this.events += ProcessorEvent.OnNext(item)
       submit(f(item));
       subscription.request(1);
     }
 
     def onError(error: Throwable): Unit = {
-      this.events.addOne(ProcessorEvent.OnError(error))
+      this.events += ProcessorEvent.OnError(error)
       closeExceptionally(error);
     }
 
     def onComplete(): Unit = {
-      this.events.addOne(ProcessorEvent.OnComplete)
+      this.events += ProcessorEvent.OnComplete
       close();
     }
 
     def getEvents: UIO[List[ProcessorEvent[A]]] =
       ZIO.succeed(this.events.toList)
 
-    def asPipeline = Adapters.processorToPipeline(FlowAdapters.toProcessor(this))
+    def asPipeline = Adapters.processorToPipeline(FlowAdapters.toProcessor[A, B](this))
   }
 }
