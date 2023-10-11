@@ -4,7 +4,7 @@ import org.reactivestreams.{ Publisher, Subscriber, Subscription }
 import org.reactivestreams.tck.SubscriberWhiteboxVerification.{ SubscriberPuppet, WhiteboxSubscriberProbe }
 import org.reactivestreams.tck.{ SubscriberWhiteboxVerification, TestEnvironment }
 import org.testng.annotations.Test
-import zio.{ Chunk, Promise, ZIO, durationInt, durationLong }
+import zio.{ Promise, ZIO, durationInt, durationLong, Chunk }
 import zio.stream.ZSink
 import zio.test.Assertion._
 import zio.test._

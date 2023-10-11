@@ -193,6 +193,7 @@ object PublisherToStreamSpec extends ZIOSpecDefault {
                      Adapters.publisherToStream(new NumberIterablePublisher(0, 1, executor.asJava), 16).runCount
                    }
                    .map(_.sum)
+
         } yield assert(sum)(equalTo(10000L))
       }
     )

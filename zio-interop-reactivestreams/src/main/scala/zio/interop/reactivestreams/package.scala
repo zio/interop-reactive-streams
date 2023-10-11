@@ -2,9 +2,11 @@ package zio.interop
 
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
-import zio.{ Scope, UIO, Task, ZIO, Trace }
+import zio.{ Scope, UIO, Task, ZIO, Trace, URIO }
 import zio.stream.ZSink
 import zio.stream.ZStream
+import org.reactivestreams.Processor
+import zio.stream.ZPipeline
 
 package object reactivestreams {
 
@@ -59,4 +61,16 @@ package object reactivestreams {
       Adapters.subscriberToSink(subscriber)
   }
 
+  final implicit class processorToPipeline[I, O](private val processor: Processor[I, O]) extends AnyVal {
+
+    def toZIOPipeline(implicit trace: Trace): ZPipeline[Any, Throwable, I, O] =
+      Adapters.processorToPipeline(processor)
+  }
+
+  final implicit class pipelineToProcessor[R <: Scope, I, O](private val pipeline: ZPipeline[R, Throwable, I, O])
+      extends AnyVal {
+
+    def toProcessor(implicit trace: Trace): URIO[R, Processor[I, O]] =
+      Adapters.pipelineToProcessor(pipeline)
+  }
 }
