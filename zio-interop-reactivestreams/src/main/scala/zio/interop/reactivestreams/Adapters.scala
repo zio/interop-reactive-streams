@@ -36,7 +36,7 @@ object Adapters {
 
   def subscriberToSink[E <: Throwable, I](
     subscriber: => Subscriber[I]
-  ): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] = ZIO.succeed {
+  )(implicit trace: Trace): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] = ZIO.succeed {
     unsafe { implicit unsafe =>
       val subscription = new SubscriptionProducer[I](subscriber)
 
