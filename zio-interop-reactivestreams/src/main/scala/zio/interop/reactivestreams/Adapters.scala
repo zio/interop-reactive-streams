@@ -108,7 +108,7 @@ object Adapters {
 
       def onComplete(): Unit = subscriber.onComplete()
 
-      def subscribe(s: Subscriber[_ >: O <: Object]): Unit = {
+      def subscribe(s: Subscriber[_ >: O]): Unit = {
         val subscription = new SubscriptionProducer[O](s)(unsafe)
         s.onSubscribe(subscription)
         unsafe { implicit u =>
@@ -137,7 +137,7 @@ object Adapters {
       else {
         state.getAndUpdate {
           case State.Running(demand) => State.Running(demand + n)
-          case State.Waiting(resume) => State.Running(n)
+          case State.Waiting(_)      => State.Running(n)
           case other                 => other
         } match {
           case State.Waiting(resume) => resume.unsafe.done(ZIO.unit)
