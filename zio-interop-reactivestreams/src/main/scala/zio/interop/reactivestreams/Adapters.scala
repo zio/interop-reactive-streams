@@ -12,8 +12,9 @@ import zio.stream._
 import java.util.concurrent.atomic.AtomicReference
 import zio.stream.internal.AsyncInputConsumer
 import zio.stream.internal.AsyncInputProducer
-import zio.UIO
 import java.util.concurrent.atomic.AtomicBoolean
+import zio.UIO
+import scala.util.control.NoStackTrace
 
 object Adapters {
 
@@ -43,7 +44,7 @@ object Adapters {
 
         def reader: ZChannel[Any, ZNothing, Chunk[I], Any, Nothing, Chunk[I], Unit] = ZChannel.readWith(
           i => ZChannel.fromZIO(subscription.emit(i)) *> reader,
-          _ => ???, // impossible
+          ZChannel.fail,
           d => ZChannel.fromZIO(subscription.done(d)) *> ZChannel.succeed(())
         )
 
@@ -78,10 +79,50 @@ object Adapters {
     } yield (subscriber, sinkFiber.join)
   }
 
+  /** Upstream errors will not be passed to the processor. If you want errors to be passed, convert the processor to a
+    * channel instead.
+    */
   def processorToPipeline[I, O](
     processor: Processor[I, O],
     bufferSize: Int = 16
   )(implicit trace: Trace): ZPipeline[Any, Throwable, I, O] = ZPipeline.unwrapScoped {
+    val subscription = new SubscriptionProducer[I](processor)(unsafe)
+    val subscriber   = new SubscriberConsumer[O](bufferSize)(unsafe)
+    val passthrough  = new PassthroughAsyncInput(subscription, subscriber)
+
+    for {
+      _ <-
+        ZIO.acquireRelease(ZIO.succeed(processor.subscribe(subscriber)))(_ => subscriber.cancelSubscription.forkDaemon)
+      _ <- ZIO.acquireRelease(ZIO.succeed(processor.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
+    } yield ZPipeline.fromChannel(ZChannel.fromInput(passthrough).embedInput(passthrough))
+  }
+
+  def publisherToChannel[O](
+    publisher: Publisher[O],
+    bufferSize: Int = 16
+  )(implicit trace: Trace): ZChannel[Any, Any, Any, Any, Throwable, Chunk[O], Any] = ZChannel.unwrapScoped[Any] {
+    val subscriber = new SubscriberConsumer[O](bufferSize)(unsafe)
+
+    for {
+      _ <-
+        ZIO.acquireRelease(ZIO.succeed(publisher.subscribe(subscriber)))(_ => subscriber.cancelSubscription.forkDaemon)
+    } yield ZChannel.fromInput(subscriber)
+  }
+
+  def subscriberToChannel[I](
+    consumer: Subscriber[I]
+  )(implicit trace: Trace): ZChannel[Any, Throwable, Chunk[I], Any, Any, Any, Any] = ZChannel.unwrapScoped[Any] {
+    val subscription = new SubscriptionProducer[I](consumer)(unsafe)
+
+    for {
+      _ <- ZIO.acquireRelease(ZIO.succeed(consumer.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
+    } yield ZChannel.fromZIO(subscription.awaitCancellation).embedInput(subscription)
+  }
+
+  def processorToChannel[I, O](
+    processor: Processor[I, O],
+    bufferSize: Int = 16
+  )(implicit trace: Trace): ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[O], Any] = ZChannel.unwrapScoped {
     val subscription = new SubscriptionProducer[I](processor)(unsafe)
     val subscriber   = new SubscriberConsumer[O](bufferSize)(unsafe)
 
@@ -89,7 +130,7 @@ object Adapters {
       _ <-
         ZIO.acquireRelease(ZIO.succeed(processor.subscribe(subscriber)))(_ => subscriber.cancelSubscription.forkDaemon)
       _ <- ZIO.acquireRelease(ZIO.succeed(processor.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
-    } yield ZPipeline.fromChannel(ZChannel.fromInput(subscriber).embedInput(subscription))
+    } yield ZChannel.fromInput(subscriber).embedInput(subscription)
   }
 
   def pipelineToProcessor[R <: Scope, I, O](
@@ -192,7 +233,7 @@ object Adapters {
           ZIO.succeed {
             cause.failureOrCause.fold(
               sub.onError,
-              c => sub.onError(new FiberFailure(c))
+              c => sub.onError(UpstreamDefect(c))
             )
           } *> canceled.succeed(())
         case State.Cancelled => ZIO.interrupt
@@ -200,7 +241,7 @@ object Adapters {
           ZIO.succeed {
             cause.failureOrCause.fold(
               sub.onError,
-              c => sub.onError(new FiberFailure(c))
+              c => sub.onError(UpstreamDefect(c))
             )
           } *> resume.interrupt *> canceled.succeed(())
       }
@@ -276,26 +317,36 @@ object Adapters {
       trace: zio.Trace
     ): UIO[B] = subscription.await.flatMap { sub =>
       ZIO.suspendSucceed {
-        state.updateAndGet {
+        state.getAndUpdate {
           case State.Drained => State.Waiting(Promise.unsafe.make[Nothing, Unit](FiberId.None))
           case State.Full    => State.Drained
           case other         => other
         } match {
           case State.Drained =>
+            // next iteration will wait
+            takeWith(onError, onElement, onDone)
+          case State.Full =>
             val data     = buffer.pollUpTo(buffer.capacity)
-            val dataSize = data.size
+            val dataSize = data.size.toLong
             if (dataSize > 0) {
               sub.request(data.size.toLong)
               ZIO.succeedNow(onElement(data))
             } else {
               ZIO.succeedNow(onElement(Chunk.empty))
             }
-          case State.Full             => ??? // impossible
-          case State.Waiting(promise) => promise.await *> takeWith(onError, onElement, onDone)
-          case State.Failed(t)        =>
+
+          case State.Waiting(promise) =>
+            promise.await *> takeWith(onError, onElement, onDone)
+          case State.Failed(t) =>
             // drain remaining data before failing
             val data = buffer.pollUpTo(buffer.capacity)
-            if (data.nonEmpty) ZIO.succeedNow(onElement(data)) else ZIO.succeedNow(onError(Cause.fail(t)))
+            if (data.nonEmpty) ZIO.succeedNow(onElement(data))
+            else {
+              t match {
+                case UpstreamDefect(cause) => ZIO.succeedNow(onError(cause))
+                case err                   => ZIO.succeedNow(onError(Cause.fail(t)))
+              }
+            }
           case State.Ended =>
             // drain remaining data before failing
             val data = buffer.pollUpTo(buffer.capacity)
@@ -316,6 +367,31 @@ object Adapters {
       final case class Failed(cause: Throwable)                 extends State
       case object Ended                                         extends State
     }
+
+  }
+
+  private final case class UpstreamDefect(cause: Cause[Nothing]) extends NoStackTrace {
+    override def getMessage(): String = s"Upsteam defect: ${cause.prettyPrint}"
+  }
+
+  class PassthroughAsyncInput[I, O](
+    producer: AsyncInputProducer[Nothing, I, Any],
+    consumer: AsyncInputConsumer[Throwable, O, Any]
+  ) extends AsyncInputProducer[Throwable, I, Any]
+      with AsyncInputConsumer[Throwable, O, Any] {
+    private val error: Promise[Nothing, Cause[Throwable]] = unsafe(implicit u => Promise.unsafe.make(FiberId.None))
+
+    def takeWith[A](onError: Cause[Throwable] => A, onElement: O => A, onDone: Any => A)(implicit
+      trace: zio.Trace
+    ): UIO[A] =
+      consumer.takeWith(onError, onElement, onDone) race error.await.map(onError)
+
+    def emit(el: I)(implicit trace: zio.Trace): UIO[Any] = producer.emit(el)
+
+    def done(a: Any)(implicit trace: zio.Trace): UIO[Any] = producer.done(a)
+
+    def error(cause: Cause[Throwable])(implicit trace: zio.Trace): UIO[Any] = error.succeed(cause)
+    def awaitRead(implicit trace: zio.Trace): UIO[Any]                      = producer.awaitRead
 
   }
 

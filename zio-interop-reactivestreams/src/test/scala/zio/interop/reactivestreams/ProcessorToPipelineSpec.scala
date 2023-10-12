@@ -37,15 +37,56 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
               )
             )
           )
+      },
+      test("passes through errors without offering them to the processor") {
+        val processor = new TestProcessor((i: Int) => i.toString())
+        val err       = new RuntimeException()
+
+        val effect = (ZStream(1, 2) ++ ZStream.fail(err)).via(processor.asPipeline).runCollect
+
+        for {
+          result <- effect.exit
+          events <- processor.getEvents
+        } yield assert(result)(fails(equalTo(err))) &&
+          assert(events)(
+            equalTo(
+              List(
+                ProcessorEvent.OnSubscribe,
+                ProcessorEvent.OnNext(1),
+                ProcessorEvent.OnNext(2)
+              )
+            )
+          )
+      },
+      test("passes through errors when converting to a raw channel") {
+        val processor = new TestProcessor((i: Int) => i.toString())
+        val err       = new RuntimeException()
+
+        val effect = ((ZStream(1, 2) ++ ZStream.fail(err)).channel >>> processor.asChannel).runCollect
+
+        for {
+          result <- effect.exit
+          events <- processor.getEvents
+        } yield assert(result)(fails(equalTo(err))) &&
+          assert(events)(
+            equalTo(
+              List(
+                ProcessorEvent.OnSubscribe,
+                ProcessorEvent.OnNext(1),
+                ProcessorEvent.OnNext(2),
+                ProcessorEvent.OnError(err)
+              )
+            )
+          )
       }
     ) @@ TestAspect.withLiveClock
 
   sealed trait ProcessorEvent[+A]
   object ProcessorEvent {
-    final case object OnSubscribe              extends ProcessorEvent[Nothing]
+    case object OnSubscribe                    extends ProcessorEvent[Nothing]
     final case class OnNext[A](item: A)        extends ProcessorEvent[A]
     final case class OnError(error: Throwable) extends ProcessorEvent[Nothing]
-    final case object OnComplete               extends ProcessorEvent[Nothing]
+    case object OnComplete                     extends ProcessorEvent[Nothing]
   }
 
   final class TestProcessor[A, B](f: A => B) extends SubmissionPublisher[B] with Flow.Processor[A, B] {
@@ -79,5 +120,7 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
       ZIO.succeed(this.events.toList)
 
     def asPipeline = Adapters.processorToPipeline(FlowAdapters.toProcessor[A, B](this))
+
+    def asChannel = Adapters.processorToChannel(FlowAdapters.toProcessor[A, B](this))
   }
 }
