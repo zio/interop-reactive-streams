@@ -97,6 +97,67 @@ object Adapters {
     } yield ZPipeline.fromChannel(ZChannel.fromInput(passthrough).embedInput(passthrough))
   }
 
+ def channelToPublisher[O](
+    channel: ZChannel[Any, Any, Any, Any, Throwable, Chunk[O], Any]
+  ): ZIO[Scope, Nothing, Publisher[O]] = ZIO.runtime[Scope].map { runtime =>
+    new Publisher[O] {
+      def subscribe(subscriber: Subscriber[_ >: O]): Unit =
+        if (subscriber == null) {
+          throw new NullPointerException("Subscriber must not be null.")
+        } else {
+          val subscription = new SubscriptionProducer[O](subscriber)(unsafe)
+          unsafe { implicit u =>
+            runtime.unsafe.run {
+              for {
+                _ <- ZIO.acquireRelease(ZIO.succeed(subscriber.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
+                _ <- (channel >>> ZChannel.fromZIO(subscription.awaitCancellation).embedInput(subscription)).runDrain.forkScoped
+              } yield ()
+            }.getOrThrow()
+          }
+        }
+    }
+  }
+
+  def channelToSubscriber[I](
+    channel: ZChannel[Any, Throwable, Chunk[I], Any, Any, Any, Any],
+    bufferSize: Int = 16
+  ): ZIO[Scope, Nothing, Subscriber[I]] = ZIO.suspendSucceed {
+    val subscriber   = new SubscriberConsumer[I](bufferSize)(unsafe)
+    for {
+      _ <- ZIO.addFinalizer(subscriber.cancelSubscription.forkDaemon)
+      _ <- (ZChannel.fromInput(subscriber) >>> channel).runDrain.forkScoped
+    } yield subscriber
+  }
+
+  def channelToProcessor[I, O](
+    channel: ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[O], Any],
+    bufferSize: Int = 16
+  ): ZIO[Scope, Nothing, Processor[I, O]] =
+    for {
+      runtime   <- ZIO.runtime[Scope]
+      subscriber = new SubscriberConsumer[I](bufferSize)(unsafe)
+    } yield new Processor[I, O] {
+      def onSubscribe(s: Subscription): Unit = subscriber.onSubscribe(s)
+
+      def onNext(t: I): Unit = subscriber.onNext(t)
+
+      def onError(t: Throwable): Unit = subscriber.onError(t)
+
+      def onComplete(): Unit = subscriber.onComplete()
+
+      def subscribe(s: Subscriber[_ >: O]): Unit = {
+        val subscription = new SubscriptionProducer[O](s)(unsafe)
+        s.onSubscribe(subscription)
+        unsafe { implicit u =>
+          runtime.unsafe.fork {
+             (ZChannel.fromInput(subscriber) >>> channel >>> ZChannel
+                     .fromZIO(subscription.awaitCancellation *> subscriber.cancelSubscription).embedInput(subscription)).runDrain
+          }
+        }
+        ()
+      }
+    }
+
   def publisherToChannel[O](
     publisher: Publisher[O],
     bufferSize: Int = 16
@@ -154,12 +215,10 @@ object Adapters {
         s.onSubscribe(subscription)
         unsafe { implicit u =>
           runtime.unsafe.fork {
-            ((ZChannel.fromInput(subscriber) pipeToOrFail pipeline.toChannel) >>> ZChannel
-              .fromZIO(subscription.awaitCancellation *> subscriber.cancelSubscription)
-              .embedInput(subscription)).runDrain
+            ((ZChannel.fromInput(subscriber) pipeToOrFail pipeline.toChannel) >>> ZChannel.fromZIO(subscription.awaitCancellation *> subscriber.cancelSubscription).embedInput(subscription)).runDrain
           }
-          ()
         }
+        ()
       }
     }
 
