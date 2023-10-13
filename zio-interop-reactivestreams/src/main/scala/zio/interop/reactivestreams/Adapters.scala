@@ -29,7 +29,7 @@ object Adapters {
           val subscription = new SubscriptionProducer[O](subscriber)
           subscriber.onSubscribe(subscription)
           runtime.unsafe.fork(
-            (stream.toChannel >>> ZChannel.fromZIO(subscription.awaitCancellation).embedInput(subscription)).runDrain
+            (stream.toChannel >>> ZChannel.fromZIO(subscription.awaitCompletion).embedInput(subscription)).runDrain
           )
           ()
         }
@@ -110,7 +110,7 @@ object Adapters {
             runtime.unsafe.run {
               for {
                 _ <- ZIO.acquireRelease(ZIO.succeed(subscriber.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
-                _ <- (channel >>> ZChannel.fromZIO(subscription.awaitCancellation).embedInput(subscription)).runDrain.forkScoped
+                _ <- (channel >>> ZChannel.fromZIO(subscription.awaitCompletion).embedInput(subscription)).runDrain.forkScoped
               } yield ()
             }.getOrThrow()
           }
@@ -136,6 +136,7 @@ object Adapters {
     for {
       runtime   <- ZIO.runtime[Scope]
       subscriber = new SubscriberConsumer[I](bufferSize)(unsafe)
+      _         <- ZIO.addFinalizer(subscriber.cancelSubscription.forkDaemon)
     } yield new Processor[I, O] {
       def onSubscribe(s: Subscription): Unit = subscriber.onSubscribe(s)
 
@@ -147,14 +148,14 @@ object Adapters {
 
       def subscribe(s: Subscriber[_ >: O]): Unit = {
         val subscription = new SubscriptionProducer[O](s)(unsafe)
-        s.onSubscribe(subscription)
         unsafe { implicit u =>
-          runtime.unsafe.fork {
-             (ZChannel.fromInput(subscriber) >>> channel >>> ZChannel
-                     .fromZIO(subscription.awaitCancellation *> subscriber.cancelSubscription).embedInput(subscription)).runDrain
-          }
+          runtime.unsafe.run {
+            for {
+              _ <- ZIO.acquireRelease(ZIO.succeed(s.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
+              _ <- (ZChannel.fromInput(subscriber) >>> channel >>> ZChannel.fromZIO(subscription.awaitCompletion *> subscriber.cancelSubscription).embedInput(subscription)).runDrain.forkScoped
+            } yield ()
+          }.getOrThrow()
         }
-        ()
       }
     }
 
@@ -177,7 +178,7 @@ object Adapters {
 
     for {
       _ <- ZIO.acquireRelease(ZIO.succeed(consumer.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
-    } yield ZChannel.fromZIO(subscription.awaitCancellation).embedInput(subscription)
+    } yield ZChannel.fromZIO(subscription.awaitCompletion).embedInput(subscription)
   }
 
   def processorToChannel[I, O](
@@ -194,7 +195,7 @@ object Adapters {
     } yield ZChannel.fromInput(subscriber).embedInput(subscription)
   }
 
-  def pipelineToProcessor[R <: Scope, I, O](
+  def pipelineToProcessor[R, I, O](
     pipeline: ZPipeline[R, Throwable, I, O],
     bufferSize: Int = 16
   )(implicit trace: Trace): ZIO[R, Nothing, Processor[I, O]] =
@@ -210,12 +211,16 @@ object Adapters {
 
       def onComplete(): Unit = subscriber.onComplete()
 
-      def subscribe(s: Subscriber[_ >: O]): Unit = {
+      def subscribe(s: Subscriber[_ >: O]): Unit =
+      if (s == null) {
+        throw new NullPointerException("Subscriber must not be null.")
+      } else {
         val subscription = new SubscriptionProducer[O](s)(unsafe)
         s.onSubscribe(subscription)
         unsafe { implicit u =>
           runtime.unsafe.fork {
-            ((ZChannel.fromInput(subscriber) pipeToOrFail pipeline.toChannel) >>> ZChannel.fromZIO(subscription.awaitCancellation *> subscriber.cancelSubscription).embedInput(subscription)).runDrain
+            ((ZChannel.fromInput(subscriber) pipeToOrFail pipeline.toChannel) >>>
+              ZChannel.fromZIO(subscription.awaitCompletion *> subscriber.cancelSubscription).embedInput(subscription)).runDrain
           }
         }
         ()
@@ -228,9 +233,9 @@ object Adapters {
     import SubscriptionProducer.State
 
     private val state: AtomicReference[State[A]] = new AtomicReference(State.initial[A])
-    private val canceled: Promise[Nothing, Unit] = Promise.unsafe.make(FiberId.None)
+    private val completed: Promise[Nothing, Unit] = Promise.unsafe.make(FiberId.None)
 
-    val awaitCancellation: UIO[Unit] = canceled.await
+    val awaitCompletion: UIO[Unit] = completed.await
 
     def request(n: Long): Unit =
       if (n <= 0) sub.onError(new IllegalArgumentException("non-positive subscription request"))
@@ -250,7 +255,7 @@ object Adapters {
         case State.Waiting(resume) => resume.unsafe.done(ZIO.interrupt)
         case _                     => ()
       }
-      canceled.unsafe.done(ZIO.unit)
+      completed.unsafe.done(ZIO.unit)
     }
 
     def emit(el: Chunk[A])(implicit trace: zio.Trace): UIO[Any] = ZIO.suspendSucceed {
@@ -280,9 +285,9 @@ object Adapters {
 
     def done(a: Any)(implicit trace: zio.Trace): UIO[Any] = ZIO.suspendSucceed {
       state.getAndSet(State.Cancelled) match {
-        case State.Running(_)      => ZIO.succeed(sub.onComplete()) *> canceled.succeed(())
+        case State.Running(_)      => ZIO.succeed(sub.onComplete()) *> completed.succeed(())
         case State.Cancelled       => ZIO.interrupt
-        case State.Waiting(resume) => ZIO.succeed(sub.onComplete()) *> resume.interrupt *> canceled.succeed(())
+        case State.Waiting(resume) => ZIO.succeed(sub.onComplete()) *> resume.interrupt *> completed.succeed(())
       }
     }
 
@@ -294,7 +299,7 @@ object Adapters {
               sub.onError,
               c => sub.onError(UpstreamDefect(c))
             )
-          } *> canceled.succeed(())
+          } *> completed.succeed(())
         case State.Cancelled => ZIO.interrupt
         case State.Waiting(resume) =>
           ZIO.succeed {
@@ -302,7 +307,7 @@ object Adapters {
               sub.onError,
               c => sub.onError(UpstreamDefect(c))
             )
-          } *> resume.interrupt *> canceled.succeed(())
+          } *> resume.interrupt *> completed.succeed(())
       }
     }
 
