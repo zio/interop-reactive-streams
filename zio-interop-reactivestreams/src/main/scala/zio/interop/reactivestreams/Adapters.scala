@@ -64,7 +64,7 @@ object Adapters {
 
     for {
       _ <-
-        ZIO.acquireRelease(ZIO.succeed(publisher.subscribe(subscriber)))(_ => subscriber.cancelSubscription.forkDaemon)
+        ZIO.acquireRelease(ZIO.succeed(publisher.subscribe(subscriber)))(_ => subscriber.cancelSubscription)
     } yield ZStream.fromChannel(ZChannel.fromInput(subscriber))
   }
 
@@ -74,7 +74,7 @@ object Adapters {
   )(implicit trace: Trace): ZIO[R with Scope, Throwable, (Subscriber[I], IO[Throwable, Z])] = {
     val subscriber = new SubscriberConsumer[I](bufferSize)(unsafe)
     for {
-      _         <- ZIO.addFinalizer(subscriber.cancelSubscription.forkDaemon)
+      _         <- ZIO.addFinalizer(subscriber.cancelSubscription)
       sinkFiber <- (ZChannel.fromInput(subscriber) pipeToOrFail sink.channel).runDrain.forkScoped
     } yield (subscriber, sinkFiber.join)
   }
@@ -92,7 +92,7 @@ object Adapters {
 
     for {
       _ <-
-        ZIO.acquireRelease(ZIO.succeed(processor.subscribe(subscriber)))(_ => subscriber.cancelSubscription.forkDaemon)
+        ZIO.acquireRelease(ZIO.succeed(processor.subscribe(subscriber)))(_ => subscriber.cancelSubscription)
       _ <- ZIO.acquireRelease(ZIO.succeed(processor.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
     } yield ZPipeline.fromChannel(ZChannel.fromInput(passthrough).embedInput(passthrough))
   }
@@ -124,7 +124,7 @@ object Adapters {
   ): ZIO[Scope, Nothing, Subscriber[I]] = ZIO.suspendSucceed {
     val subscriber   = new SubscriberConsumer[I](bufferSize)(unsafe)
     for {
-      _ <- ZIO.addFinalizer(subscriber.cancelSubscription.forkDaemon)
+      _ <- ZIO.addFinalizer(subscriber.cancelSubscription)
       _ <- (ZChannel.fromInput(subscriber) >>> channel).runDrain.forkScoped
     } yield subscriber
   }
@@ -136,7 +136,7 @@ object Adapters {
     for {
       runtime   <- ZIO.runtime[Scope]
       subscriber = new SubscriberConsumer[I](bufferSize)(unsafe)
-      _         <- ZIO.addFinalizer(subscriber.cancelSubscription.forkDaemon)
+      _         <- ZIO.addFinalizer(subscriber.cancelSubscription)
     } yield new Processor[I, O] {
       def onSubscribe(s: Subscription): Unit = subscriber.onSubscribe(s)
 
@@ -167,7 +167,7 @@ object Adapters {
 
     for {
       _ <-
-        ZIO.acquireRelease(ZIO.succeed(publisher.subscribe(subscriber)))(_ => subscriber.cancelSubscription.forkDaemon)
+        ZIO.acquireRelease(ZIO.succeed(publisher.subscribe(subscriber)))(_ => subscriber.cancelSubscription)
     } yield ZChannel.fromInput(subscriber)
   }
 
@@ -190,18 +190,20 @@ object Adapters {
 
     for {
       _ <-
-        ZIO.acquireRelease(ZIO.succeed(processor.subscribe(subscriber)))(_ => subscriber.cancelSubscription.forkDaemon)
+        ZIO.acquireRelease(ZIO.succeed(processor.subscribe(subscriber)))(_ => subscriber.cancelSubscription)
       _ <- ZIO.acquireRelease(ZIO.succeed(processor.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
     } yield ZChannel.fromInput(subscriber).embedInput(subscription)
   }
 
-  def pipelineToProcessor[R, I, O](
+  def pipelineToProcessor[R <: Scope, I, O](
     pipeline: ZPipeline[R, Throwable, I, O],
     bufferSize: Int = 16
   )(implicit trace: Trace): ZIO[R, Nothing, Processor[I, O]] =
     for {
-      runtime   <- ZIO.runtime[R]
-      subscriber = new SubscriberConsumer[I](bufferSize)(unsafe)
+      runtime           <- ZIO.runtime[R]
+      subscriber         = new SubscriberConsumer[I](bufferSize)(unsafe)
+      outerFinalizerRef <- Ref.make(subscriber.cancelSubscription)
+      _                 <- ZIO.addFinalizer(outerFinalizerRef.get.flatten)
     } yield new Processor[I, O] {
       def onSubscribe(s: Subscription): Unit = subscriber.onSubscribe(s)
 
@@ -211,19 +213,18 @@ object Adapters {
 
       def onComplete(): Unit = subscriber.onComplete()
 
-      def subscribe(s: Subscriber[_ >: O]): Unit =
-      if (s == null) {
-        throw new NullPointerException("Subscriber must not be null.")
-      } else {
+      def subscribe(s: Subscriber[_ >: O]): Unit = {
         val subscription = new SubscriptionProducer[O](s)(unsafe)
-        s.onSubscribe(subscription)
         unsafe { implicit u =>
-          runtime.unsafe.fork {
-            ((ZChannel.fromInput(subscriber) pipeToOrFail pipeline.toChannel) >>>
-              ZChannel.fromZIO(subscription.awaitCompletion *> subscriber.cancelSubscription).embedInput(subscription)).runDrain
-          }
+          runtime.unsafe.run {
+            for {
+              finalizerRef <- Ref.make(ZIO.unit)
+              _            <- ZIO.addFinalizer(finalizerRef.get.flatten)
+              _            <- (ZIO.succeed(s.onSubscribe(subscription)) *> finalizerRef.set(ZIO.succeed(subscription.cancel()))).uninterruptible
+              _            <- ((ZChannel.fromInput(subscriber) pipeToOrFail pipeline.toChannel) >>> ZChannel.fromZIO(subscription.awaitCompletion *> ZIO.succeed(subscription.cancel()) *> finalizerRef.set(ZIO.unit) *> subscriber.cancelSubscription *> outerFinalizerRef.set(ZIO.unit)).embedInput(subscription)).runDrain.forkScoped
+            } yield ()
+          }.getOrThrow()
         }
-        ()
       }
     }
 
@@ -333,10 +334,10 @@ object Adapters {
     private val subscription: Promise[Nothing, Subscription] = Promise.unsafe.make(FiberId.None)
     private val buffer: RingBuffer[A]                        = RingBuffer(capacity)
     private val state: AtomicReference[State]                = new AtomicReference(State.Drained)
-    private val isSubscribed: AtomicBoolean                  = new AtomicBoolean(false)
+    private val isSubscribedOrCanceled: AtomicBoolean        = new AtomicBoolean(false)
 
     def onSubscribe(s: Subscription): Unit =
-      if (!isSubscribed.compareAndSet(false, true)) {
+      if (!isSubscribedOrCanceled.compareAndSet(false, true)) {
         s.cancel()
       } else {
         subscription.unsafe.done(ZIO.succeedNow(s))
@@ -375,7 +376,8 @@ object Adapters {
       }
 
     def cancelSubscription: UIO[Unit] =
-      subscription.await.tap(s => ZIO.succeed(s.cancel())).unit
+      ZIO.succeed(isSubscribedOrCanceled.set(true)) *>
+        subscription.poll.flatMap(ZIO.foreachDiscard(_)(_.map(_.cancel())))
 
     def takeWith[B](onError: Cause[Throwable] => B, onElement: Chunk[A] => B, onDone: Any => B)(implicit
       trace: zio.Trace
