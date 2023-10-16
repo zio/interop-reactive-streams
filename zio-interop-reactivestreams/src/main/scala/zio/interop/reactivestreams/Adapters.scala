@@ -313,7 +313,7 @@ object Adapters {
 
   private class SubscriberConsumer[A](capacity: Int)(implicit unsafe: Unsafe)
       extends Subscriber[A]
-      with AsyncInputConsumer[Throwable, Chunk[A], Any] {
+      with AsyncInputConsumer[Throwable, Chunk[A], Unit] {
     import SubscriberConsumer.State
 
     private val subscription: Promise[Nothing, Subscription] = Promise.unsafe.make(FiberId.None)
@@ -370,7 +370,7 @@ object Adapters {
           case _                      => ()
         })
 
-    def takeWith[B](onError: Cause[Throwable] => B, onElement: Chunk[A] => B, onDone: Any => B)(implicit
+    def takeWith[B](onError: Cause[Throwable] => B, onElement: Chunk[A] => B, onDone: Unit => B)(implicit
       trace: zio.Trace
     ): UIO[B] = subscription.await.flatMap { sub =>
       ZIO.suspendSucceed {
@@ -401,7 +401,7 @@ object Adapters {
             else {
               t match {
                 case UpstreamDefect(cause) => ZIO.succeedNow(onError(cause))
-                case err                   => ZIO.succeedNow(onError(Cause.fail(t)))
+                case err                   => ZIO.succeedNow(onError(Cause.fail(err)))
               }
             }
           case State.Ended =>
