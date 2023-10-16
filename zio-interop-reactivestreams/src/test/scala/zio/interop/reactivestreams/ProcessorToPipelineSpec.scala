@@ -7,7 +7,8 @@ import zio.stream.ZStream
 import zio.test.Assertion._
 import zio.test._
 import scala.collection.mutable.ListBuffer
-import java.util.concurrent.SubmissionPublisher
+import java8.util.concurrent.SubmissionPublisher
+import java8.util.concurrent.{ Flow => Flow8 }
 import java.util.concurrent.Flow
 import org.reactivestreams.FlowAdapters
 
@@ -89,9 +90,10 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
     case object OnComplete                     extends ProcessorEvent[Nothing]
   }
 
-  final class TestProcessor[A, B](f: A => B) extends SubmissionPublisher[B] with Flow.Processor[A, B] {
+  final class TestProcessor[A, B](f: A => B) extends Flow.Processor[A, B] {
 
     private var subscription: Flow.Subscription = null
+    private val submissionPublisher             = new SubmissionPublisher[B]()
     private val events                          = ListBuffer[ProcessorEvent[A]]()
 
     def onSubscribe(subscription: Flow.Subscription): Unit = {
@@ -102,25 +104,48 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
 
     def onNext(item: A): Unit = {
       this.events += ProcessorEvent.OnNext(item)
-      submit(f(item));
+      submissionPublisher.submit(f(item));
       subscription.request(1);
     }
 
     def onError(error: Throwable): Unit = {
       this.events += ProcessorEvent.OnError(error)
-      closeExceptionally(error);
+      submissionPublisher.closeExceptionally(error);
     }
 
     def onComplete(): Unit = {
       this.events += ProcessorEvent.OnComplete
-      close();
+      submissionPublisher.close();
     }
 
     def getEvents: UIO[List[ProcessorEvent[A]]] =
       ZIO.succeed(this.events.toList)
 
+    def subscribe(subscriber: Flow.Subscriber[_ >: B]): Unit =
+      submissionPublisher.subscribe(new CompatSubscriber[B](subscriber))
+
     def asPipeline = Adapters.processorToPipeline(FlowAdapters.toProcessor[A, B](this))
 
     def asChannel = Adapters.processorToChannel(FlowAdapters.toProcessor[A, B](this))
+
+  }
+
+  final class CompatSubscriber[B](underlying: Flow.Subscriber[_ >: B]) extends Flow8.Subscriber[B] {
+    def onSubscribe(subscription: Flow8.Subscription): Unit =
+      underlying.onSubscribe(new CompatSubscription(subscription))
+
+    def onNext(item: B): Unit = underlying.onNext(item)
+
+    def onError(throwable: Throwable): Unit = underlying.onError(throwable)
+
+    def onComplete(): Unit = underlying.onComplete()
+
+  }
+
+  final class CompatSubscription(underlying: Flow8.Subscription) extends Flow.Subscription {
+    def request(n: Long): Unit =
+      underlying.request(n)
+    def cancel(): Unit =
+      underlying.cancel()
   }
 }

@@ -364,7 +364,7 @@ object Adapters {
     def cancelSubscription: UIO[Unit] =
       ZIO.succeed(isSubscribedOrCanceled.set(true)) *>
         subscription.poll.flatMap(ZIO.foreachDiscard(_)(_.map(_.cancel()))) *>
-        subscription.interrupt.unit *>
+        subscription.interrupt.exit *>
         ZIO.succeed(state.getAndSet(State.Canceled) match {
           case State.Waiting(promise) => promise.unsafe.done(ZIO.unit)
           case _                      => ()
