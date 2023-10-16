@@ -55,12 +55,13 @@ lazy val interopReactiveStreams = project
   .settings(testFrameworks += new TestFramework("zio.test.sbt.ZTestFramework"))
   .settings(
     libraryDependencies ++= Seq(
-      "dev.zio"            %% "zio"                  % zioVersion,
-      "dev.zio"            %% "zio-streams"          % zioVersion,
-      "dev.zio"            %% "zio-test"             % zioVersion % Test,
-      "dev.zio"            %% "zio-test-sbt"         % zioVersion % Test,
-      "org.reactivestreams" % "reactive-streams"     % rsVersion,
-      "org.reactivestreams" % "reactive-streams-tck" % rsVersion  % Test
+      "dev.zio"                      %% "zio"                  % zioVersion,
+      "dev.zio"                      %% "zio-streams"          % zioVersion,
+      "dev.zio"                      %% "zio-test"             % zioVersion % Test,
+      "dev.zio"                      %% "zio-test-sbt"         % zioVersion % Test,
+      "org.reactivestreams"           % "reactive-streams"     % rsVersion,
+      "org.reactivestreams"           % "reactive-streams-tck" % rsVersion  % Test,
+      "net.sourceforge.streamsupport" % "streamsupport-flow"   % "1.7.4"    % Test
     ),
     libraryDependencies ++= {
       if (scalaVersion.value == ScalaDotty)

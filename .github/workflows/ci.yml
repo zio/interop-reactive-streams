@@ -60,7 +60,7 @@ jobs:
         uses: coursier/cache-action@v6
       - name: Check Document Generation
         run: sbt docs/compileDocs
-        
+
   publish:
     runs-on: ubuntu-20.04
     needs: [lint, test, website]

@@ -2,9 +2,13 @@ package zio.interop
 
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
-import zio.{ Scope, UIO, Task, ZIO, Trace }
+import zio.{ Scope, UIO, Task, ZIO, Trace, URIO }
 import zio.stream.ZSink
 import zio.stream.ZStream
+import org.reactivestreams.Processor
+import zio.stream.ZPipeline
+import zio.stream.ZChannel
+import zio.Chunk
 
 package object reactivestreams {
 
@@ -39,6 +43,11 @@ package object reactivestreams {
       */
     def toZIOStream(qSize: Int = 16)(implicit trace: Trace): ZStream[Any, Throwable, O] =
       Adapters.publisherToStream(publisher, qSize)
+
+    def toPublisherZIOChannel(bufferSize: Int = 16)(implicit
+      trace: Trace
+    ): ZChannel[Any, Any, Any, Any, Throwable, Chunk[O], Any] =
+      Adapters.publisherToChannel(publisher, bufferSize)
   }
 
   final implicit class subscriberToSink[I](private val subscriber: Subscriber[I]) extends AnyVal {
@@ -57,6 +66,26 @@ package object reactivestreams {
       trace: Trace
     ): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
+
+    def toSubscriberZIOChannel(implicit trace: Trace): ZChannel[Any, Throwable, Chunk[I], Any, Any, Any, Any] =
+      Adapters.subscriberToChannel(subscriber)
   }
 
+  final implicit class processorToPipeline[I, O](private val processor: Processor[I, O]) extends AnyVal {
+
+    def toZIOPipeline(implicit trace: Trace): ZPipeline[Any, Throwable, I, O] =
+      Adapters.processorToPipeline(processor)
+
+    def toProcessorZIOChannel(implicit
+      trace: Trace
+    ): ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[O], Any] =
+      Adapters.processorToChannel(processor)
+  }
+
+  final implicit class pipelineToProcessor[R <: Scope, I, O](private val pipeline: ZPipeline[R, Throwable, I, O])
+      extends AnyVal {
+
+    def toProcessor(implicit trace: Trace): URIO[R, Processor[I, O]] =
+      Adapters.pipelineToProcessor(pipeline)
+  }
 }

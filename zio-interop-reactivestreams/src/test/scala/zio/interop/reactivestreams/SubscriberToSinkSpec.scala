@@ -88,7 +88,22 @@ object SubscriberToSinkSpec extends ZIOSpecDefault {
             err2               <- probe.expectError.timeout(100.millis).exit
           } yield assert(err)(succeeds(equalTo(e))) && assert(err2)(fails(anything))
         }
-      }
+      },
+      test("transports errors when transforming to channel") {
+        makeSubscriber.flatMap(probe =>
+          ZIO.scoped[Any] {
+            val channel = probe.underlying.toSubscriberZIOChannel
+            for {
+              fiber    <- ((ZStream.fromIterable(seq) ++ ZStream.fail(e)).channel >>> channel).runDrain.fork
+              _        <- ZIO.sleep(100.millis)
+              _        <- probe.request(length + 1)
+              elements <- probe.nextElements(length).exit
+              err      <- probe.expectError.exit
+              _        <- fiber.join
+            } yield assert(elements)(succeeds(equalTo(seq))) && assert(err)(succeeds(equalTo(e)))
+          }
+        )
+      } @@ TestAspect.withLiveClock
     )
 
   val seq: List[Int] = List.range(0, 31)
