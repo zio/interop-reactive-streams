@@ -44,7 +44,7 @@ package object reactivestreams {
     def toZIOStream(qSize: Int = 16)(implicit trace: Trace): ZStream[Any, Throwable, O] =
       Adapters.publisherToStream(publisher, qSize)
 
-    def toZIOChannel(bufferSize: Int = 16)(implicit
+    def toPublisherZIOChannel(bufferSize: Int = 16)(implicit
       trace: Trace
     ): ZChannel[Any, Any, Any, Any, Throwable, Chunk[O], Any] =
       Adapters.publisherToChannel(publisher, bufferSize)
@@ -67,7 +67,7 @@ package object reactivestreams {
     ): ZIO[Scope, Nothing, (E => UIO[Unit], ZSink[Any, Nothing, I, I, Unit])] =
       Adapters.subscriberToSink(subscriber)
 
-    def toZIOChannel(implicit trace: Trace): ZChannel[Any, Throwable, Chunk[I], Any, Any, Any, Any] =
+    def toSubscriberZIOChannel(implicit trace: Trace): ZChannel[Any, Throwable, Chunk[I], Any, Any, Any, Any] =
       Adapters.subscriberToChannel(subscriber)
   }
 

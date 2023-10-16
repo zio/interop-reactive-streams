@@ -92,7 +92,7 @@ object SubscriberToSinkSpec extends ZIOSpecDefault {
       test("transports errors when transforming to channel") {
         makeSubscriber.flatMap(probe =>
           ZIO.scoped[Any] {
-            val channel = probe.underlying.toZIOChannel
+            val channel = probe.underlying.toSubscriberZIOChannel
             for {
               fiber    <- ((ZStream.fromIterable(seq) ++ ZStream.fail(e)).channel >>> channel).runDrain.fork
               _        <- ZIO.sleep(100.millis)

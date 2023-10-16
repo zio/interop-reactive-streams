@@ -9,8 +9,7 @@ import zio.test._
 import scala.collection.mutable.ListBuffer
 import java8.util.concurrent.SubmissionPublisher
 import java8.util.concurrent.{ Flow => Flow8 }
-import java.util.concurrent.Flow
-import org.reactivestreams.FlowAdapters
+import org.reactivestreams.{ Processor, Subscriber, Subscription }
 
 object ProcessorToPipelineSpec extends ZIOSpecDefault {
 
@@ -19,7 +18,7 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
       test("works with a well behaved `Publisher`") {
         val processor = new TestProcessor((i: Int) => i.toString())
 
-        val effect = ZStream(1, 2, 3, 4, 5).via(processor.asPipeline).runCollect
+        val effect = ZStream(1, 2, 3, 4, 5).via(processor.toZIOPipeline).runCollect
 
         for {
           result <- effect
@@ -43,7 +42,7 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
         val processor = new TestProcessor((i: Int) => i.toString())
         val err       = new RuntimeException()
 
-        val effect = (ZStream(1, 2) ++ ZStream.fail(err)).via(processor.asPipeline).runCollect
+        val effect = (ZStream(1, 2) ++ ZStream.fail(err)).via(processor.toZIOPipeline).runCollect
 
         for {
           result <- effect.exit
@@ -63,7 +62,7 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
         val processor = new TestProcessor((i: Int) => i.toString())
         val err       = new RuntimeException()
 
-        val effect = ((ZStream(1, 2) ++ ZStream.fail(err)).channel >>> processor.asChannel).runCollect
+        val effect = ((ZStream(1, 2) ++ ZStream.fail(err)).channel >>> processor.toProcessorZIOChannel).runCollect
 
         for {
           result <- effect.exit
@@ -90,13 +89,13 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
     case object OnComplete                     extends ProcessorEvent[Nothing]
   }
 
-  final class TestProcessor[A, B](f: A => B) extends Flow.Processor[A, B] {
+  final class TestProcessor[A, B](f: A => B) extends Processor[A, B] {
 
-    private var subscription: Flow.Subscription = null
-    private val submissionPublisher             = new SubmissionPublisher[B]()
-    private val events                          = ListBuffer[ProcessorEvent[A]]()
+    private var subscription: Subscription = null
+    private val submissionPublisher        = new SubmissionPublisher[B]()
+    private val events                     = ListBuffer[ProcessorEvent[A]]()
 
-    def onSubscribe(subscription: Flow.Subscription): Unit = {
+    def onSubscribe(subscription: Subscription): Unit = {
       this.events += ProcessorEvent.OnSubscribe
       this.subscription = subscription;
       subscription.request(1);
@@ -121,16 +120,11 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
     def getEvents: UIO[List[ProcessorEvent[A]]] =
       ZIO.succeed(this.events.toList)
 
-    def subscribe(subscriber: Flow.Subscriber[_ >: B]): Unit =
+    def subscribe(subscriber: Subscriber[_ >: B]): Unit =
       submissionPublisher.subscribe(new CompatSubscriber[B](subscriber))
-
-    def asPipeline = Adapters.processorToPipeline(FlowAdapters.toProcessor[A, B](this))
-
-    def asChannel = Adapters.processorToChannel(FlowAdapters.toProcessor[A, B](this))
-
   }
 
-  final class CompatSubscriber[B](underlying: Flow.Subscriber[_ >: B]) extends Flow8.Subscriber[B] {
+  final class CompatSubscriber[B](underlying: Subscriber[_ >: B]) extends Flow8.Subscriber[B] {
     def onSubscribe(subscription: Flow8.Subscription): Unit =
       underlying.onSubscribe(new CompatSubscription(subscription))
 
@@ -142,7 +136,7 @@ object ProcessorToPipelineSpec extends ZIOSpecDefault {
 
   }
 
-  final class CompatSubscription(underlying: Flow8.Subscription) extends Flow.Subscription {
+  final class CompatSubscription(underlying: Flow8.Subscription) extends Subscription {
     def request(n: Long): Unit =
       underlying.request(n)
     def cancel(): Unit =
