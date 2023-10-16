@@ -20,20 +20,19 @@ object Adapters {
 
   def streamToPublisher[R, E <: Throwable, O](
     stream: => ZStream[R, E, O]
-  )(implicit trace: Trace): ZIO[R, Nothing, Publisher[O]] =
-    ZIO.runtime[R].map { runtime => subscriber =>
-      if (subscriber == null) {
-        throw new NullPointerException("Subscriber must not be null.")
-      } else
-        unsafe { implicit unsafe =>
-          val subscription = new SubscriptionProducer[O](subscriber)
-          subscriber.onSubscribe(subscription)
-          runtime.unsafe.fork(
-            (stream.toChannel >>> ZChannel.fromZIO(subscription.awaitCompletion).embedInput(subscription)).runDrain
-          )
-          ()
-        }
-    }
+  )(implicit trace: Trace): ZIO[R, Nothing, Publisher[O]] = ZIO.runtime[R].map { runtime => subscriber =>
+    if (subscriber == null) {
+      throw new NullPointerException("Subscriber must not be null.")
+    } else
+      unsafe { implicit unsafe =>
+        val subscription = new SubscriptionProducer[O](subscriber)
+        subscriber.onSubscribe(subscription)
+        runtime.unsafe.fork(
+          (stream.toChannel >>> ZChannel.fromZIO(subscription.awaitCompletion).embedInput(subscription)).runDrain
+        )
+        ()
+      }
+  }
 
   def subscriberToSink[E <: Throwable, I](
     subscriber: => Subscriber[I]
@@ -42,9 +41,9 @@ object Adapters {
       unsafe { implicit unsafe =>
         val subscription = new SubscriptionProducer[I](subscriber)
 
-        def reader: ZChannel[Any, ZNothing, Chunk[I], Any, Nothing, Chunk[I], Unit] = ZChannel.readWith(
+        def reader: ZChannel[Any, ZNothing, Chunk[I], Any, Nothing, Chunk[I], Unit] = ZChannel.readWithCause(
           i => ZChannel.fromZIO(subscription.emit(i)) *> reader,
-          ZChannel.fail,
+          e => ZChannel.failCause(e),
           d => ZChannel.fromZIO(subscription.done(d)) *> ZChannel.succeed(())
         )
 
@@ -59,24 +58,26 @@ object Adapters {
   def publisherToStream[O](
     publisher: => Publisher[O],
     bufferSize: => Int
-  )(implicit trace: Trace): ZStream[Any, Throwable, O] = ZStream.unwrapScoped {
-    val subscriber = new SubscriberConsumer[O](bufferSize)(unsafe)
-
-    for {
-      _ <-
-        ZIO.acquireRelease(ZIO.succeed(publisher.subscribe(subscriber)))(_ => subscriber.cancelSubscription)
-    } yield ZStream.fromChannel(ZChannel.fromInput(subscriber))
-  }
+  )(implicit trace: Trace): ZStream[Any, Throwable, O] = publisherToChannel(publisher, bufferSize).toStream
 
   def sinkToSubscriber[R, I, L, Z](
     sink: => ZSink[R, Throwable, I, L, Z],
     bufferSize: => Int
   )(implicit trace: Trace): ZIO[R with Scope, Throwable, (Subscriber[I], IO[Throwable, Z])] = {
-    val subscriber = new SubscriberConsumer[I](bufferSize)(unsafe)
+    def promChannel(prom: Promise[Throwable, Z]): ZChannel[R, Throwable, Chunk[L], Z, Any, Any, Any] =
+      ZChannel.readWithCause(
+        ZChannel.write(_) *> promChannel(prom),
+        e => ZChannel.fromZIO(prom.failCause(e)) *> ZChannel.failCause(e),
+        d => ZChannel.fromZIO(prom.succeed(d)) *> ZChannel.succeed(d)
+      )
+
     for {
-      _         <- ZIO.addFinalizer(subscriber.cancelSubscription)
-      sinkFiber <- (ZChannel.fromInput(subscriber) pipeToOrFail sink.channel).runDrain.forkScoped
-    } yield (subscriber, sinkFiber.join)
+      prom <- Promise.make[Throwable, Z]
+      subscriber <- channelToSubscriber(
+                      (ZChannel.identity[Throwable, Chunk[I], Any] pipeToOrFail sink.channel) >>> promChannel(prom),
+                      bufferSize
+                    )
+    } yield (subscriber, prom.await)
   }
 
   /** Upstream errors will not be passed to the processor. If you want errors to be passed, convert the processor to a
@@ -97,9 +98,15 @@ object Adapters {
     } yield ZPipeline.fromChannel(ZChannel.fromInput(passthrough).embedInput(passthrough))
   }
 
- def channelToPublisher[O](
-    channel: ZChannel[Any, Any, Any, Any, Throwable, Chunk[O], Any]
-  ): ZIO[Scope, Nothing, Publisher[O]] = ZIO.runtime[Scope].map { runtime =>
+  def pipelineToProcessor[R <: Scope, I, O](
+    pipeline: ZPipeline[R, Throwable, I, O],
+    bufferSize: Int = 16
+  )(implicit trace: Trace): ZIO[R, Nothing, Processor[I, O]] =
+    channelToProcessor(ZChannel.identity pipeToOrFail pipeline.channel, bufferSize)
+
+  def channelToPublisher[R <: Scope, O](
+    channel: ZChannel[R, Any, Any, Any, Throwable, Chunk[O], Any]
+  ): ZIO[R, Nothing, Publisher[O]] = ZIO.runtime[R].map { runtime =>
     new Publisher[O] {
       def subscribe(subscriber: Subscriber[_ >: O]): Unit =
         if (subscriber == null) {
@@ -109,8 +116,12 @@ object Adapters {
           unsafe { implicit u =>
             runtime.unsafe.run {
               for {
-                _ <- ZIO.acquireRelease(ZIO.succeed(subscriber.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
-                _ <- (channel >>> ZChannel.fromZIO(subscription.awaitCompletion).embedInput(subscription)).runDrain.forkScoped
+                _ <- ZIO.acquireRelease(ZIO.succeed(subscriber.onSubscribe(subscription)))(_ =>
+                       ZIO.succeed(subscription.cancel())
+                     )
+                _ <- (channel >>> ZChannel
+                       .fromZIO(subscription.awaitCompletion)
+                       .embedInput(subscription)).runDrain.forkScoped
               } yield ()
             }.getOrThrow()
           }
@@ -118,23 +129,23 @@ object Adapters {
     }
   }
 
-  def channelToSubscriber[I](
-    channel: ZChannel[Any, Throwable, Chunk[I], Any, Any, Any, Any],
+  def channelToSubscriber[R <: Scope, I](
+    channel: ZChannel[R, Throwable, Chunk[I], Any, Any, Any, Any],
     bufferSize: Int = 16
-  ): ZIO[Scope, Nothing, Subscriber[I]] = ZIO.suspendSucceed {
-    val subscriber   = new SubscriberConsumer[I](bufferSize)(unsafe)
+  ): ZIO[R, Nothing, Subscriber[I]] = ZIO.suspendSucceed {
+    val subscriber = new SubscriberConsumer[I](bufferSize)(unsafe)
     for {
       _ <- ZIO.addFinalizer(subscriber.cancelSubscription)
       _ <- (ZChannel.fromInput(subscriber) >>> channel).runDrain.forkScoped
     } yield subscriber
   }
 
-  def channelToProcessor[I, O](
-    channel: ZChannel[Any, Throwable, Chunk[I], Any, Throwable, Chunk[O], Any],
+  def channelToProcessor[R <: Scope, I, O](
+    channel: ZChannel[R, Throwable, Chunk[I], Any, Throwable, Chunk[O], Any],
     bufferSize: Int = 16
-  ): ZIO[Scope, Nothing, Processor[I, O]] =
+  ): ZIO[R, Nothing, Processor[I, O]] =
     for {
-      runtime   <- ZIO.runtime[Scope]
+      runtime   <- ZIO.runtime[R]
       subscriber = new SubscriberConsumer[I](bufferSize)(unsafe)
       _         <- ZIO.addFinalizer(subscriber.cancelSubscription)
     } yield new Processor[I, O] {
@@ -151,8 +162,15 @@ object Adapters {
         unsafe { implicit u =>
           runtime.unsafe.run {
             for {
-              _ <- ZIO.acquireRelease(ZIO.succeed(s.onSubscribe(subscription)))(_ => ZIO.succeed(subscription.cancel()))
-              _ <- (ZChannel.fromInput(subscriber) >>> channel >>> ZChannel.fromZIO(subscription.awaitCompletion *> subscriber.cancelSubscription).embedInput(subscription)).runDrain.forkScoped
+              finalizerRef <- Ref.make(ZIO.unit)
+              _            <- ZIO.addFinalizer(finalizerRef.get.flatten)
+              _ <- (ZIO.succeed(s.onSubscribe(subscription)) *> finalizerRef.set(
+                     ZIO.succeed(subscription.cancel())
+                   )).uninterruptible
+              _ <-
+                (ZChannel.fromInput(subscriber) >>> channel >>> ZChannel
+                  .fromZIO(subscription.awaitCompletion *> finalizerRef.set(ZIO.unit) *> subscriber.cancelSubscription)
+                  .embedInput(subscription)).runDrain.forkScoped
             } yield ()
           }.getOrThrow()
         }
@@ -195,45 +213,12 @@ object Adapters {
     } yield ZChannel.fromInput(subscriber).embedInput(subscription)
   }
 
-  def pipelineToProcessor[R <: Scope, I, O](
-    pipeline: ZPipeline[R, Throwable, I, O],
-    bufferSize: Int = 16
-  )(implicit trace: Trace): ZIO[R, Nothing, Processor[I, O]] =
-    for {
-      runtime           <- ZIO.runtime[R]
-      subscriber         = new SubscriberConsumer[I](bufferSize)(unsafe)
-      outerFinalizerRef <- Ref.make(subscriber.cancelSubscription)
-      _                 <- ZIO.addFinalizer(outerFinalizerRef.get.flatten)
-    } yield new Processor[I, O] {
-      def onSubscribe(s: Subscription): Unit = subscriber.onSubscribe(s)
-
-      def onNext(t: I): Unit = subscriber.onNext(t)
-
-      def onError(t: Throwable): Unit = subscriber.onError(t)
-
-      def onComplete(): Unit = subscriber.onComplete()
-
-      def subscribe(s: Subscriber[_ >: O]): Unit = {
-        val subscription = new SubscriptionProducer[O](s)(unsafe)
-        unsafe { implicit u =>
-          runtime.unsafe.run {
-            for {
-              finalizerRef <- Ref.make(ZIO.unit)
-              _            <- ZIO.addFinalizer(finalizerRef.get.flatten)
-              _            <- (ZIO.succeed(s.onSubscribe(subscription)) *> finalizerRef.set(ZIO.succeed(subscription.cancel()))).uninterruptible
-              _            <- ((ZChannel.fromInput(subscriber) pipeToOrFail pipeline.toChannel) >>> ZChannel.fromZIO(subscription.awaitCompletion *> ZIO.succeed(subscription.cancel()) *> finalizerRef.set(ZIO.unit) *> subscriber.cancelSubscription *> outerFinalizerRef.set(ZIO.unit)).embedInput(subscription)).runDrain.forkScoped
-            } yield ()
-          }.getOrThrow()
-        }
-      }
-    }
-
   private class SubscriptionProducer[A](sub: Subscriber[_ >: A])(implicit unsafe: Unsafe)
       extends Subscription
       with AsyncInputProducer[Throwable, Chunk[A], Any] {
     import SubscriptionProducer.State
 
-    private val state: AtomicReference[State[A]] = new AtomicReference(State.initial[A])
+    private val state: AtomicReference[State[A]]  = new AtomicReference(State.initial[A])
     private val completed: Promise[Nothing, Unit] = Promise.unsafe.make(FiberId.None)
 
     val awaitCompletion: UIO[Unit] = completed.await
@@ -347,8 +332,9 @@ object Adapters {
     def onNext(t: A): Unit =
       if (t == null) {
         throw new NullPointerException("t was null in onNext")
+      } else if (!buffer.offer(t)) {
+        throw new IllegalStateException("buffer is full")
       } else {
-        buffer.offer(t)
         state.getAndUpdate {
           case State.Drained    => State.Full
           case State.Waiting(_) => State.Full
@@ -377,21 +363,23 @@ object Adapters {
 
     def cancelSubscription: UIO[Unit] =
       ZIO.succeed(isSubscribedOrCanceled.set(true)) *>
-        subscription.poll.flatMap(ZIO.foreachDiscard(_)(_.map(_.cancel())))
+        subscription.poll.flatMap(ZIO.foreachDiscard(_)(_.map(_.cancel()))) *>
+        subscription.interrupt.unit *>
+        ZIO.succeed(state.getAndSet(State.Canceled) match {
+          case State.Waiting(promise) => promise.unsafe.done(ZIO.unit)
+          case _                      => ()
+        })
 
     def takeWith[B](onError: Cause[Throwable] => B, onElement: Chunk[A] => B, onDone: Any => B)(implicit
       trace: zio.Trace
     ): UIO[B] = subscription.await.flatMap { sub =>
       ZIO.suspendSucceed {
-        state.getAndUpdate {
+        state.updateAndGet {
           case State.Drained => State.Waiting(Promise.unsafe.make[Nothing, Unit](FiberId.None))
           case State.Full    => State.Drained
           case other         => other
         } match {
           case State.Drained =>
-            // next iteration will wait
-            takeWith(onError, onElement, onDone)
-          case State.Full =>
             val data     = buffer.pollUpTo(buffer.capacity)
             val dataSize = data.size.toLong
             if (dataSize > 0) {
@@ -401,8 +389,11 @@ object Adapters {
               ZIO.succeedNow(onElement(Chunk.empty))
             }
 
+          case State.Full => ??? // impossible
+
           case State.Waiting(promise) =>
             promise.await *> takeWith(onError, onElement, onDone)
+
           case State.Failed(t) =>
             // drain remaining data before failing
             val data = buffer.pollUpTo(buffer.capacity)
@@ -417,6 +408,9 @@ object Adapters {
             // drain remaining data before failing
             val data = buffer.pollUpTo(buffer.capacity)
             if (data.nonEmpty) ZIO.succeedNow(onElement(data)) else ZIO.succeedNow(onDone(()))
+
+          case State.Canceled =>
+            ZIO.interrupt
         }
       }
     }
@@ -427,11 +421,13 @@ object Adapters {
     sealed trait State
 
     object State {
+      final case class Waiting(promise: Promise[Nothing, Unit]) extends State
       case object Drained                                       extends State
       case object Full                                          extends State
-      final case class Waiting(promise: Promise[Nothing, Unit]) extends State
       final case class Failed(cause: Throwable)                 extends State
       case object Ended                                         extends State
+      case object Canceled                                      extends State
+
     }
 
   }
@@ -460,5 +456,4 @@ object Adapters {
     def awaitRead(implicit trace: zio.Trace): UIO[Any]                      = producer.awaitRead
 
   }
-
 }
