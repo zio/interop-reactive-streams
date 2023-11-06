@@ -36,7 +36,7 @@ Global / onChangedBuildSource := ReloadOnSourceChanges
 addCommandAlias("fmt", "all scalafmtSbt scalafmt test:scalafmt")
 addCommandAlias("check", "all scalafmtSbtCheck scalafmtCheck test:scalafmtCheck")
 
-val zioVersion        = "2.0.5"
+val zioVersion        = "2.0.19"
 val rsVersion         = "1.0.4"
 val collCompatVersion = "2.7.0"
 
